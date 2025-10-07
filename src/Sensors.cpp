@@ -1,8 +1,10 @@
 // src/Sensors.cpp
 #include "Sensors.h"
 
-Sensors::Sensors(int oneWirePin) : oneWire(oneWirePin), dsSensors(&oneWire) {}
-
+Sensors::Sensors(int oneWirePin, int voltPin, int currPin) : oneWire(oneWirePin), dsSensors(&oneWire), voltagePin(voltPin), currentPin(currPin) {
+    pinMode(voltagePin, INPUT);
+    pinMode(currentPin, INPUT);
+}
 bool Sensors::init() {
     Wire.begin();  // Инициализация I2C
     if (!mpu.begin()) {
@@ -36,4 +38,22 @@ void Sensors::readDS(float &temp1, float &temp2, float &temp3) {
     temp1 = dsSensors.getTempC(dsAddresses[0]);
     temp2 = dsSensors.getTempC(dsAddresses[1]);
     temp3 = dsSensors.getTempC(dsAddresses[2]);
+}
+
+float Sensors::readVoltage() {
+    float R1 = 300000.0;  //  Вот эти значения надо продумать как изменять                          
+    float R2 = 51000.0;   // потому что у нас не всегда будет напряжение 21В
+    int analogValue = analogRead(voltagePin);  // 0-4095 (12-бит ADC)
+    float voltageOut = (analogValue * 3.3) / 4095.0;  // V_out при 3.3V опорном
+    float voltageIn = voltageOut / (R2 / (R1 + R2));  // V_in батареи
+    return voltageIn;
+}
+
+float Sensors::readCurrent() { 
+    // ACS758 питается от 5V или 3.3V? Если 5V, центр 2.5V, 
+    // скорректируйте формулу (current = (voltageOut - 2.5) / 0.04).
+    int analogValue = analogRead(currentPin);  // 0-4095
+    float voltageOut = (analogValue * 3.3) / 4095.0;  // V_out
+    float current = (voltageOut - 1.65) / 0.04;  // Для ±100A, центр 1.65V при 3.3V
+    return current;
 }

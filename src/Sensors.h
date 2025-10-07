@@ -15,12 +15,16 @@ private:
     OneWire oneWire;  // Шина для DS18B20
     DallasTemperature dsSensors;  // DS18B20
     DeviceAddress dsAddresses[3];  // Адреса трёх датчиков
+    int voltagePin;  // Пин для напряжения (делитель)
+    int currentPin;  // Пин для тока (ACS758)
 
 public:
-    Sensors(int oneWirePin);  // Конструктор
+    Sensors(int oneWirePin, int voltPin, int currPin);  // Конструктор
     bool init();  // Инициализация с проверкой
     void readMPU(float &ax, float &ay, float &az, float &gx, float &gy, float &gz);  // Чтение MPU
     void readDS(float &temp1, float &temp2, float &temp3);  // Чтение DS18B20
+    float readVoltage();  // Напряжение с делителя
+    float readCurrent();  // Ток с ACS758
 };
 
 #endif

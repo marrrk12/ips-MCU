@@ -1,0 +1,64 @@
+name: Local MCU Agent
+version: 1.0.0
+schema: v1
+models:
+  - name: QwenCoder_7b
+    provider: ollama
+    model: qwen2.5-coder:7b
+    roles:
+      - edit
+      - chat
+    defaultCompletionOptions:
+      temperature: 0.7
+      maxTokens: 1500
+      num_gpu: 20
+  - name: GPTCoder_20b
+    provider: ollama
+    model: gpt-oss:20b
+    roles:
+      - edit
+      - chat
+    defaultCompletionOptions:
+      temperature: 0.7
+      maxTokens: 1500
+      num_gpu: 20
+  - name: QwenCoderRU_32b
+    provider: ollama
+    model: rscr/ruadapt_qwen2.5_32b:Q2_K_M
+    roles:
+      - edit
+      - chat
+    defaultCompletionOptions:
+      temperature: 0.7
+      maxTokens: 1500
+  - name: CodeLlamaHeavy_34b
+    provider: ollama
+    model: codellama:34b
+    roles:
+      - chat
+      - edit
+    defaultCompletionOptions:
+      temperature: 0.7
+      maxTokens: 4000
+rules:
+  - Всегда генерируй оптимизированный C-код для микроконтроллеров с минимальным использованием памяти.
+  - Всегда отвечай на русском языке, включая комментарии в коде.
+  - Следуй структуре проекта, описанной в .continue/rules/project_structure.md.
+context:
+  - provider: code
+  - provider: file
+  - provider: codebase
+    params:
+      nFinal: 10  # Ограничивает количество возвращаемых файлов
+      include:  # Индексируем только нужные файлы
+        - "src/**/*.c"
+        - "src/**/*.h"
+        - "src/**/*.cpp"
+        - "src/**/*.py"
+        - "platformio.ini"
+      exclude:  # Исключаем временные и ненужные файлы
+        - "**/build/**"
+        - "**/lib/**"
+        - "**/*.o"
+        - "**/*.bin"
+        - "**/__pycache__/**"

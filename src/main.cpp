@@ -1,9 +1,13 @@
 #include "Sensors.h"
 #include "UARTComm.h"
+#include "MotorControl.h"
+#include "SystemLogic.h"
 
-Sensors sensors(PA1);  // Пин для 1-Wire
+Sensors sensors(PB3, PA0, PA1);  // Пин для 1-Wire
 HardwareSerial Serial1(PA10, PA9);
 UARTComm uart(Serial1);  // Используем существующий Serial1
+MotorControl motorControl(PA8, 100.0f);
+SystemLogic systemLogic(sensors, motorControl, uart);  // Логика системы
 
 void setup() {
     Serial1.begin(115200);  // Инициализация UART
@@ -13,12 +17,6 @@ void setup() {
 }
 
 void loop() {
-    float ax, ay, az, gx, gy, gz;
-    float temp1, temp2, temp3;
-    sensors.readMPU(ax, ay, az, gx, gy, gz);
-    sensors.readDS(temp1, temp2, temp3);
-
-    uart.sendData(ax, ay, az, gx, gy, gz, temp1, temp2, temp3);
-
-    delay(500);
+    systemLogic.update();  // Обновление логики
+    delay(500);  // Задержка для стабильности
 }
