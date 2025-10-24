@@ -17,12 +17,13 @@ public:
     void sendData(int16_t ax, int16_t ay, int16_t az, 
         int16_t gx, int16_t gy, int16_t gz, 
         float temp1, float temp2, float temp3, 
-        float voltage, float current);  // Отправка форматированных данных
+        float voltage, float current, float pwm,
+        int errorCode = -1);  // Отправка форматированных данных
 
     bool receiveForecast(float& predAX, float& predAY, float& predAZ, 
                         float& predGX, float& predGY, float& predGZ,
                          float& predTEMP1, float& predTEMP2, float& predTEMP3, 
-                         float& predVOLT, float& predCURR);
+                         float& predVOLT, float& predCURR, float& predPWM);
 
 };
 #endif

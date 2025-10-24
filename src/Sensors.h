@@ -2,6 +2,25 @@
 #ifndef SENSORS_H
 #define SENSORS_H
 
+// Настраиваемые значения (изменяйте здесь для испытаний/полётов)
+#define R1_VOLTAGE 300000.0f  // R1 в делителе напряжения
+#define R2_VOLTAGE 20000.0f   // R2: 20000 для испытаний (21В), 51000 для полётов (21-48В)
+
+// Для ACS758 (питание 5В)
+#define ACS_QUIESCENT 0.6f    // Quiescent Vout при 5В
+#define ACS_SENS 0.04f        // Чувствительность 40мВ/А
+#define ACS_DIVIDER_SCALE 2.0f  // Масштаб делителя Vout (например, 2 для 10k/10k делителя, чтобы 5В→2.5В)
+
+#define BATTERY_5S   0  // Испытания: 21В номинал, min=18.5В
+#define BATTERY_10S  1  // Полёты: 42В номинал, min=37В
+
+// Выберите конфигурацию BATTERY_5S или BATTERY_10S
+#define BATTERY_TYPE BATTERY_10S
+
+// Пороги разряда (V)
+#define MIN_VOLTAGE_5S  18.5f
+#define MIN_VOLTAGE_10S 37.0f
+
 #include <Arduino.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>

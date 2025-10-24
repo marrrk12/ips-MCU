@@ -6,9 +6,11 @@ MotorControl::MotorControl(int pin, float maxCurrent) : pwmPin(pin), maxCurrent(
     analogWrite(pwmPin, 0);  // Начальное значение
 }
 
-void MotorControl::setPWM(int value) {
+bool MotorControl::setPWM(int value) {
+    int prevPWM = currentPWM;
     currentPWM = constrain(value, minPWM, maxPWM);  // Ограничение
     analogWrite(pwmPin, currentPWM);
+    return currentPWM == value;
 }
 
 bool MotorControl::setCurrent(float current) {
@@ -28,4 +30,8 @@ void MotorControl::adjustPWM(int delta) {
 
 int MotorControl::getCurrentPWM() {
     return currentPWM;
+}
+
+float MotorControl::getMaxCurrent() {
+    return maxCurrent;
 }

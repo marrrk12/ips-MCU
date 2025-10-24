@@ -7,7 +7,7 @@ Sensors::Sensors(int oneWirePin, int voltPin, int currPin) : oneWire(oneWirePin)
 }
 bool Sensors::init() {
     Wire.begin();  // Инициализация I2C
-    if (!mpu.begin()) {
+    if (!mpu.begin(0x68, &Wire)) {
         return false;  // Ошибка инициализации MPU
     }
     mpu.setAccelerometerRange(MPU6050_RANGE_8_G);  // Настройка диапазона
@@ -41,19 +41,16 @@ void Sensors::readDS(float &temp1, float &temp2, float &temp3) {
 }
 
 float Sensors::readVoltage() {
-    float R1 = 300000.0;  //  Вот эти значения надо продумать как изменять                          
-    float R2 = 51000.0;   // потому что у нас не всегда будет напряжение 21В
-    int analogValue = analogRead(voltagePin);  // 0-4095 (12-бит ADC)
-    float voltageOut = (analogValue * 3.3) / 4095.0;  // V_out при 3.3V опорном
-    float voltageIn = voltageOut / (R2 / (R1 + R2));  // V_in батареи
+    int analogValue = analogRead(voltagePin);  // 0-4095
+    float voltageOut = (analogValue * 3.3f) / 4095.0f;  // V_out при 3.3V ADC
+    float voltageIn = voltageOut / (R2_VOLTAGE / (R1_VOLTAGE + R2_VOLTAGE));  // V_in батареи (настраиваемо)
     return voltageIn;
 }
 
 float Sensors::readCurrent() { 
-    // ACS758 питается от 5V или 3.3V? Если 5V, центр 2.5V, 
-    // скорректируйте формулу (current = (voltageOut - 2.5) / 0.04).
     int analogValue = analogRead(currentPin);  // 0-4095
-    float voltageOut = (analogValue * 3.3) / 4095.0;  // V_out
-    float current = (voltageOut - 1.65) / 0.04;  // Для ±100A, центр 1.65V при 3.3V
+    float voltageOut = (analogValue * 3.3f) / 4095.0f;  // V_out от ADC
+    voltageOut *= ACS_DIVIDER_SCALE;  // Коррекция за делитель (если есть, иначе 1.0f)
+    float current = (voltageOut - ACS_QUIESCENT) / ACS_SENS;  // Формула для униполярного ACS758 на 5В
     return current;
 }
