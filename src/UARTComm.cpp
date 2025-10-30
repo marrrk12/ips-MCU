@@ -66,6 +66,9 @@ bool UARTComm::receiveForecast(float& predAX, float& predAY, float& predAZ,
                     }
                     token++;
                 }
+                if (predPWM < 1000.0f || predPWM > 2000.0f) {
+                    return false;  // Игнор прогноза
+                }
                 bufferIndex = 0;  // Сброс буфера
                 memset(buffer, 0, sizeof(buffer));
                 return true;

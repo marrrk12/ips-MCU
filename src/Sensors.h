@@ -22,15 +22,18 @@
 #define MIN_VOLTAGE_10S 37.0f
 
 #include <Arduino.h>
-#include <Adafruit_MPU6050.h>
-#include <Adafruit_Sensor.h>
+// #include <Adafruit_MPU6050.h>
+// #include <Adafruit_Sensor.h>
 #include <Wire.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include "I2Cdev.h"
+#include "MPU6050.h"  // Jeff Rowberg
 
 class Sensors {
 private:
-    Adafruit_MPU6050 mpu;  // Обновлённый объект MPU-6050
+    // Adafruit_MPU6050 mpu;  // Обновлённый объект MPU-6050
+    MPU6050 mpu;
     OneWire oneWire;  // Шина для DS18B20
     DallasTemperature dsSensors;  // DS18B20
     DeviceAddress dsAddresses[3];  // Адреса трёх датчиков
@@ -44,6 +47,11 @@ public:
     void readDS(float &temp1, float &temp2, float &temp3);  // Чтение DS18B20
     float readVoltage();  // Напряжение с делителя
     float readCurrent();  // Ток с ACS758
+
+    // Калибровка (вызывать по кнопке или при старте)
+    void calibrateMPU();
+    void saveCalibrationToEEPROM();  // Опционально
+    void loadCalibrationFromEEPROM(); // Опционально
 };
 
 #endif

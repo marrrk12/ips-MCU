@@ -14,40 +14,44 @@ void SystemLogic::update() {
     sensors.readMPU(ax, ay, az, gx, gy, gz);
     sensors.readDS(temp1, temp2, temp3);
 
-    float vibration = calculateVibration(ax, ay, az);  // Расчёт вибраций
-    // bool motorOk = motor.setCurrent(current);  // Установка тока
+    float vibration = calculateVibration(ax, ay, az);
 
-    
-
-    // Прогнозы от RPi
     float predAX = 0, predAY = 0, predAZ = 0, predGX = 0, predGY = 0, predGZ = 0;
     float predTEMP1 = temp1, predTEMP2 = temp2, predTEMP3 = temp3;
     float predVOLT = voltage, predCURR = current, predPWM = motor.getCurrentPWM() * 1000.0f;
     bool useForecast = uart.receiveForecast(predAX, predAY, predAZ, predGX, predGY, predGZ,
                                            predTEMP1, predTEMP2, predTEMP3, predVOLT, predCURR, predPWM);
-    
-    bool uartOk = useForecast; // UART OK, если прогноз получен
-    int errorCode = getErrorCode(temp1, vibration, voltage, current, predVOLT, predCURR, predPWM);
+    bool uartOk = useForecast;
 
-    // Корректировка ШИМ
-    int targetPWM = useForecast ? adjustPWM(predPWM, predVOLT, predCURR, voltage, current) : motor.getCurrentPWM();
+    // Чтение ШИМ от полётного контроллера
+    float inputPWM = readInputPWM(); // В μs
+    // Комбинируем inputPWM и predPWM (например, берём минимум для безопасности)
+    float effectivePWM = useForecast ? min(inputPWM, predPWM) : inputPWM;
+
+    int errorCode = getErrorCode(temp1, vibration, voltage, current, predVOLT, predCURR, predPWM);
+    int targetPWM = useForecast ? adjustPWM(predPWM, predVOLT, predCURR, voltage, current) 
+    : adjustPWM(motor.getCurrentPWM() * 1000.0f, voltage, current, voltage, current);
     bool motorOk = motor.setPWM(targetPWM);
 
-    // Остановка при ошибке
+    // Обновление светодиода с приоритетом ошибок
+    updateLED(errorCode, uartOk && motorOk);
+
     if (errorCode != ERROR_NONE || !motorOk) {
         motor.setPWM(0);
+        analogWrite(PA8, 0);
     }
 
-    // Обновление светодиода
-    updateLED(errorCode, uartOk);
-
     float pwm_value = motor.getCurrentPWM() * 1000.0f;
-    // Отправка данных на RPi
     uart.sendData(static_cast<int16_t>(ax * 100), static_cast<int16_t>(ay * 100), static_cast<int16_t>(az * 100),
                   static_cast<int16_t>(gx * 100), static_cast<int16_t>(gy * 100), static_cast<int16_t>(gz * 100),
                   temp1, temp2, temp3, voltage, current, pwm_value, errorCode);
 }
 
+float SystemLogic::readInputPWM() {
+    unsigned long pulse = pulseIn(INPUT_PWM_PIN, HIGH, 25000); // Ожидаем импульс до 25 мс
+    if (pulse == 0) return motor.getCurrentPWM() * 1000.0f; // Если нет сигнала, вернуть текущий ШИМ
+    return constrain(pulse, 1000.0f, 2000.0f); // Ограничиваем 1000–2000 μs
+}
 
 int SystemLogic::getErrorCode(float temp1, float vibration, float voltage, float current, float predVolt, float predCurr, float predPWM) {
     if (current > maxCurrent) return ERROR_OVERCURRENT;
@@ -60,21 +64,20 @@ int SystemLogic::getErrorCode(float temp1, float vibration, float voltage, float
     return ERROR_NONE;
 }
 
-int SystemLogic::adjustPWM(float predPWM, float predVolt, float predCurr, float voltage, float current) {
-    float currentPWM = static_cast<float>(motor.getCurrentPWM());
-    float targetPWM = predPWM / 1000.0f * 255.0f; // Конвертация μs в 0-255
+int SystemLogic::adjustPWM(float effectivePWM, float predVolt, float predCurr, float voltage, float current) {
+    float targetPWM = static_cast<int>(effectivePWM / 1000.0f * 255.0f); // Конвертация μs в 0-255
 
     // Защита батареи: снижение ШИМ при низком напряжении
     if (predVolt < minVoltage * predVoltThreshold || voltage < minVoltage) {
-        targetPWM = max(currentPWM - pwmAdjustStep, 0.0f);
+        targetPWM = max(targetPWM - pwmAdjustStep, 0.0f);
     }
     // Защита мотора: снижение ШИМ при высоком токе
-    else if (predCurr > maxCurrent * predCurrThreshold || current > maxCurrent * 0.8f) {
-        targetPWM = max(currentPWM - pwmAdjustStep, 0.0f);
+    else if (predCurr > maxCurrent * predCurrThreshold || current > maxCurrent) {
+        targetPWM = max(targetPWM - pwmAdjustStep, 0.0f);
     }
     // Повышение ШИМ, если прогноз безопасен
-    else if (predVolt > minVoltage && predCurr < maxCurrent * 0.7f && predPWM <= predPWMThreshold) {
-        targetPWM = min(currentPWM + pwmAdjustStep, 255.0f);
+    else if (predVolt > minVoltage && predCurr < maxCurrent * 0.7f && effectivePWM <= predPWMThreshold) {
+        targetPWM = min(targetPWM + pwmAdjustStep, 255.0f);
     }
 
     return constrain(static_cast<int>(targetPWM), 0, 255);
@@ -84,7 +87,20 @@ float SystemLogic::calculateVibration(float ax, float ay, float az) {
     return sqrt(ax * ax + ay * ay + (az - 9.81f) * (az - 9.81f));
 }
 
-void SystemLogic::updateLED(int errorCode, bool uartOk) {
+void SystemLogic::updateLED(int errorCode, bool systemOk) {
+    unsigned long currentTime = millis();
+    
+    // Сбрасываем состояние при изменении errorCode или systemOk
+    if (errorCode != lastErrorCode || systemOk != lastSystemOk) {
+        ledBlinkCount = 0;
+        ledTargetBlinks = 0;
+        ledState = false;
+        digitalWrite(LED_PIN, HIGH); // Выкл (инвертированная логика)
+        lastLedUpdate = currentTime;
+        lastErrorCode = errorCode;
+        lastSystemOk = systemOk;
+    }
+
     if (errorCode == ERROR_CRITICAL) {
         digitalWrite(LED_PIN, LOW); // Постоянно горит
         ledBlinkCount = 0;
@@ -92,10 +108,10 @@ void SystemLogic::updateLED(int errorCode, bool uartOk) {
         ledState = true;
     } else if (errorCode != ERROR_NONE) {
         ledBlinkPattern(4, 200, 200, 2000); // 4 быстрых моргания
-    } else if (!uartOk) {
+    } else if (!systemOk) {
         ledBlinkPattern(2, 200, 200, 2000); // 2 быстрых моргания
     } else {
-        ledBlinkPattern(1, 200, 1800, 2000); // 1 короткое моргание
+        ledBlinkPattern(1, 200, 1800, 2000); // 1 моргание
     }
 }
 
@@ -103,31 +119,28 @@ void SystemLogic::ledBlinkPattern(int blinks, int onTime, int offTime, int cycle
     unsigned long currentTime = millis();
 
     // Начало нового цикла
-    if (currentTime - lastLedUpdate >= cycleTime) {
+    if (currentTime - lastLedUpdate >= cycleTime && ledBlinkCount == 0) {
         ledBlinkCount = 0;
         ledTargetBlinks = blinks;
         ledState = true;
-        digitalWrite(LED_PIN, LOW); // Вкл (инвертированная логика)
+        digitalWrite(LED_PIN, LOW); // Вкл
         ledNextToggle = currentTime + onTime;
         lastLedUpdate = currentTime;
         return;
     }
 
-    // Если цикл активен, проверяем переключение
+    // Переключение в активном цикле
     if (ledTargetBlinks > 0 && currentTime >= ledNextToggle) {
         if (ledState) {
-            // Выключаем светодиод
             digitalWrite(LED_PIN, HIGH); // Выкл
             ledState = false;
             ledNextToggle = currentTime + offTime;
             ledBlinkCount++;
         } else if (ledBlinkCount < ledTargetBlinks) {
-            // Включаем светодиод для следующего моргания
             digitalWrite(LED_PIN, LOW); // Вкл
             ledState = true;
             ledNextToggle = currentTime + onTime;
         } else {
-            // Завершаем цикл морганий
             ledTargetBlinks = 0;
             ledBlinkCount = 0;
             digitalWrite(LED_PIN, HIGH); // Выкл

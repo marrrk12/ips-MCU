@@ -12,7 +12,7 @@ private:
     MotorControl& motor;
     UARTComm& uart;
     float maxTemp = 50.0f;       // Максимальная температура (°C)
-    float maxVibration = 15.0f;  // Максимальная вибрация (m/s²)
+    float maxVibration = 2.0f;  // Максимальная вибрация (m/s²)
     float minVoltage;            // Динамический порог напряжения
     float maxCurrent;            // Максимальный ток из MotorControl
     float predVoltThreshold = 0.9f;  // Порог прогноза напряжения (90% от minVoltage)
@@ -24,7 +24,11 @@ private:
     int ledBlinkCount = 0; // Счётчик морганий
     int ledTargetBlinks = 0; // Сколько раз моргнуть
     bool ledState = false; // Текущее состояние (вкл/выкл)
+    int lastErrorCode = ERROR_NONE; // Добавляем
+    bool lastSystemOk = true; // Добавляем
     unsigned long ledNextToggle = 0; // Время следующего переключения
+    const int INPUT_PWM_PIN = PB8; // Пин для входного ШИМ от полётного контроллера
+    float readInputPWM(); // Чтение ШИМ (μs)
     void updateLED(int errorCode, bool uartOk);
     void ledBlinkPattern(int blinks, int onTime, int offTime, int cycleTime);
 
@@ -44,7 +48,7 @@ public:
 private:
     float calculateVibration(float ax, float ay, float az);  // Расчёт вибраций
     int getErrorCode(float temp1, float vibration, float voltage, float current, float predVolt, float predCurr, float predPWM);
-    int adjustPWM(float predPWM, float predVolt, float predCurr, float voltage, float current);
+    int adjustPWM(float effectivePWM, float predVolt, float predCurr, float voltage, float current);
 
 };
 
