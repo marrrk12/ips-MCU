@@ -84,7 +84,18 @@ int SystemLogic::adjustPWM(float effectivePWM, float predVolt, float predCurr, f
 }
 
 float SystemLogic::calculateVibration(float ax, float ay, float az) {
-    return sqrt(ax * ax + ay * ay + (az - 9.81f) * (az - 9.81f));
+    // Текущая норма гравитации (должна быть ~9.81)
+    float currentMagnitude = sqrt(ax*ax + ay*ay + az*az);
+    
+    // Отклонение от 9.81 м/с²
+    float vibration = fabs(currentMagnitude - 9.81f);
+    
+    // Фильтр (обязательно!)
+    static float filtered = 0.0f;
+    const float alpha = 0.7f;
+    filtered = alpha * filtered + (1.0f - alpha) * vibration;
+    Serial1.println("MPU filtred vibronation: " + String(filtered) + "");
+    return filtered;
 }
 
 void SystemLogic::updateLED(int errorCode, bool systemOk) {

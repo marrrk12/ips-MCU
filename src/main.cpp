@@ -19,33 +19,60 @@ void setup() {
     pinMode(LED_PIN, OUTPUT); // Инициализация светодиода
     digitalWrite(LED_PIN, HIGH); // Выключен (инвертированная логика на PC13)
     pinMode(PB8, INPUT); // Вход для ШИМ от полётного контроллера
+    pinMode(PB6, INPUT_PULLUP);
+    pinMode(PB7, INPUT_PULLUP);
     Serial1.begin(115200);
 
-    // IWDG: 5 секунд
-    hiwdg.Instance = IWDG;
-    hiwdg.Init.Prescaler = IWDG_PRESCALER_32;   // 40kHz / 32 = 1.25 kHz
-    hiwdg.Init.Reload    = 12500;                // 12500 / 1.25 kHz = 10 сек
-    HAL_IWDG_Init(&hiwdg);
+    // // IWDG: 5 секунд
+    // hiwdg.Instance = IWDG;
+    // hiwdg.Init.Prescaler = IWDG_PRESCALER_32;   // 40kHz / 32 = 1.25 kHz
+    // hiwdg.Init.Reload    = 25000;                // 12500 / 1.25 kHz = 10 сек
+    // HAL_IWDG_Init(&hiwdg);
 
     // Тест UART: "живой"
     Serial1.println("IPS-MCU START");
+
+    Serial1.println("I2C SCAN...");
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+            Serial1.print("Found I2C: 0x");
+            if (addr < 16) Serial1.print("0");
+            Serial1.println(addr, HEX);
+        }
+        // HAL_IWDG_Refresh(&hiwdg);
+    }
+    Serial1.println("SCAN DONE");
 
     if (!sensors.init()) {
         Serial1.println("INIT FAILED");
         while (1) {
             digitalWrite(LED_PIN, !digitalRead(LED_PIN));
             delay(100);
-            HAL_IWDG_Refresh(&hiwdg);
+            // HAL_IWDG_Refresh(&hiwdg);
         }
     }
+    Serial1.println("SYSTEM READY");
 
     // КАЛИБРОВКА ПО КОМАНДЕ (опционально)
-    sensors.calibrateMPU();
+    // sensors.calibrateMPU();
 }
 
 void loop() {
-    // HAL_IWDG_Refresh(&hiwdg);
+    Serial1.println("LOOP START");
+    
+    if (Serial1.available()) {
+        String cmd = Serial1.readStringUntil('\n');
+        cmd.trim();
+        if (cmd == "CALIBRATE") {
+            Serial1.println("STARTING CALIBRATION...");
+            sensors.calibrateMPU();
+            Serial1.println("CALIBRATION DONE & SAVED");
+        }
+    }
+
     systemLogic.update();  // Обновление логики
     // HAL_IWDG_Refresh(&hiwdg);
     delay(500);  // Задержка для стабильности
+    Serial1.println("LOOP END");
 }

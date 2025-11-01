@@ -8,19 +8,30 @@ Sensors::Sensors(int oneWirePin, int voltPin, int currPin)
     pinMode(currentPin, INPUT);
 }
 bool Sensors::init() {
+    Serial1.println("Sensors::init() START");
+
+        // Включаем подтяжки (на всякий случай)
+    pinMode(PB6, INPUT_PULLUP);
+    pinMode(PB7, INPUT_PULLUP);
+    
     Wire.begin();  // Инициализация I2C
     Wire.setClock(100000);  // 100 kHz — надёжно
 
-    // Включаем подтяжки (на всякий случай)
-    pinMode(PB6, INPUT_PULLUP);
-    pinMode(PB7, INPUT_PULLUP);
+    Serial1.println("Wire.begin() OK");
 
     mpu.initialize();
-    if (!mpu.testConnection()) {
-        Serial1.println("MPU6050: NO CONNECTION");
+    Serial1.println("mpu.initialize() OK");
+
+    bool connected = mpu.testConnection();
+    Serial1.print("mpu.testConnection(): ");
+    Serial1.println(connected ? "OK" : "FAILED");
+
+    if (!connected) {
+        Serial1.println("MPU6050 NOT RESPONDING!");
         return false;
     }
-    Serial1.println("MPU6050: OK");
+    
+    Serial1.println("MPU6050 CONNECTED");
 
     // Настройка диапазонов
     mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_8);
@@ -41,13 +52,17 @@ bool Sensors::init() {
     // mpu.setGyroRange(MPU6050_RANGE_500_DEG);
     // mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);  // Фильтр 21 Гц
     
-    dsSensors.begin();  // Инициализация DS18B20
+    dsSensors.begin();
     for (uint8_t i = 0; i < 3; i++) {
         if (!dsSensors.getAddress(dsAddresses[i], i)) {
-            Serial1.println("ds FAIL");
-            return false;  // Ошибка адреса
+            Serial1.print("DS18B20 #");
+            Serial1.print(i);
+            Serial1.println(" NOT FOUND");
+            return false;
         }
     }
+
+    Serial1.println("Sensors::init() SUCCESS");
     return true;
 }
 
@@ -55,34 +70,31 @@ void Sensors::readMPU(float &ax, float &ay, float &az, float &gx, float &gy, flo
     int16_t ax_raw, ay_raw, az_raw, gx_raw, gy_raw, gz_raw;
     mpu.getMotion6(&ax_raw, &ay_raw, &az_raw, &gx_raw, &gy_raw, &gz_raw);
 
-    // Конвертация
-    ax = ax_raw / 4096.0f;  // ±8g
+    // ±8g → 4096 LSB/g
+    ax = ax_raw / 4096.0f;
     ay = ay_raw / 4096.0f;
     az = az_raw / 4096.0f;
-    gx = gx_raw / 65.5f;    // ±500°/s
+
+    // ±500 °/s → 65.5 LSB/°/s
+    gx = gx_raw / 65.5f;
     gy = gy_raw / 65.5f;
     gz = gz_raw / 65.5f;
-    
-    
-    
-    // sensors_event_t a, g, temp;
-    // mpu.getEvent(&a, &g, &temp);
-    // ax = a.acceleration.x;
-    // ay = a.acceleration.y;
-    // az = a.acceleration.z;
-    // gx = g.gyro.x;
-    // gy = g.gyro.y;
-    // gz = g.gyro.z;
-}
+}   
 
 void Sensors::calibrateMPU() {
     Serial1.println("MPU CALIBRATION START (6 iterations)");
+
+    // Калибровка акселерометра
     mpu.CalibrateAccel(6);
+    Serial1.println("Accel calibrated");
+
+    // Калибровка гироскопа
     mpu.CalibrateGyro(6);
-    Serial1.println("MPU CALIBRATION DONE");
+    Serial1.println("Gyro calibrated");
 
     // Сохраняем в EEPROM
     saveCalibrationToEEPROM();
+    Serial1.println("CALIBRATION SAVED TO EEPROM");
 }
 
 void Sensors::saveCalibrationToEEPROM() {

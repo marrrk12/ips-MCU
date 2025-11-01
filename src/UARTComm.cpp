@@ -10,9 +10,9 @@ void UARTComm::sendData(int16_t ax, int16_t ay, int16_t az,
                         float temp1, float temp2, float temp3, 
                         float voltage, float current, 
                         float pwm, int errorCode) {
-    serial.print("AX:"); serial.print(ax); serial.print(";");
-    serial.print("AY:"); serial.print(ay); serial.print(";");
-    serial.print("AZ:"); serial.print(az); serial.print(";");
+    serial.print("AX:"); serial.print((int16_t)(ax * 100)); serial.print(";");
+    serial.print("AY:"); serial.print((int16_t)(ay * 100)); serial.print(";");
+    serial.print("AZ:"); serial.print((int16_t)(az * 100)); serial.print(";");
     serial.print("GX:"); serial.print(gx); serial.print(";");
     serial.print("GY:"); serial.print(gy); serial.print(";");
     serial.print("GZ:"); serial.print(gz); serial.print(";");
