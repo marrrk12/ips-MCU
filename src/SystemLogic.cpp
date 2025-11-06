@@ -14,7 +14,7 @@ void SystemLogic::update() {
     sensors.readMPU(ax, ay, az, gx, gy, gz);
     sensors.readDS(temp1, temp2, temp3);
 
-    float vibration = calculateVibration(ax, ay, az);
+    float vibration = sensors.getVibrationLevel();  // 0–100
 
     float predAX = 0, predAY = 0, predAZ = 0, predGX = 0, predGY = 0, predGZ = 0;
     float predTEMP1 = temp1, predTEMP2 = temp2, predTEMP3 = temp3;
@@ -28,9 +28,9 @@ void SystemLogic::update() {
     // Комбинируем inputPWM и predPWM (например, берём минимум для безопасности)
     float effectivePWM = useForecast ? min(inputPWM, predPWM) : inputPWM;
 
-    int errorCode = getErrorCode(temp1, vibration, voltage, current, predVOLT, predCURR, predPWM);
-    int targetPWM = useForecast ? adjustPWM(predPWM, predVOLT, predCURR, voltage, current) 
-    : adjustPWM(motor.getCurrentPWM() * 1000.0f, voltage, current, voltage, current);
+    int errorCode = getErrorCode(temp1, temp2, temp3, vibration, voltage, current, predVOLT, predCURR, predPWM, predTEMP2);
+    int targetPWM = useForecast ? adjustPWM(effectivePWM, predVOLT, predCURR, voltage, current, predTEMP2, temp2) 
+    : adjustPWM(motor.getCurrentPWM() * 1000.0f, voltage, current, voltage, current, predTEMP2, temp2);
     bool motorOk = motor.setPWM(targetPWM);
 
     // Обновление светодиода с приоритетом ошибок
@@ -44,7 +44,7 @@ void SystemLogic::update() {
     float pwm_value = motor.getCurrentPWM() * 1000.0f;
     uart.sendData(static_cast<int16_t>(ax * 100), static_cast<int16_t>(ay * 100), static_cast<int16_t>(az * 100),
                   static_cast<int16_t>(gx * 100), static_cast<int16_t>(gy * 100), static_cast<int16_t>(gz * 100),
-                  temp1, temp2, temp3, voltage, current, pwm_value, errorCode);
+                  temp1, temp2, temp3, voltage, current, pwm_value, errorCode, vibration);
 }
 
 float SystemLogic::readInputPWM() {
@@ -53,18 +53,22 @@ float SystemLogic::readInputPWM() {
     return constrain(pulse, 1000.0f, 2000.0f); // Ограничиваем 1000–2000 μs
 }
 
-int SystemLogic::getErrorCode(float temp1, float vibration, float voltage, float current, float predVolt, float predCurr, float predPWM) {
-    if (current > maxCurrent) return ERROR_OVERCURRENT;
+int SystemLogic::getErrorCode(float temp1, float temp2, float temp3, float vibration, float voltage, float current, float predVolt, float predCurr, float predPWM, float predTEMP2) {
+    if (temp2 > maxTempBattery) return ERROR_OVERHEAT_BATTERY;  // АКБ перегрев
     if (temp1 > maxTemp) return ERROR_OVERHEAT;
-    if (vibration > maxVibration) return ERROR_HIGH_VIBRATION;
+    // if (vibration > maxVibration) return ERROR_HIGH_VIBRATION;
+    if (sensors.isVibrationDetected()) return ERROR_HIGH_VIBRATION;
     if (voltage < minVoltage) return ERROR_LOW_VOLTAGE;
+    if (current > maxCurrent) return ERROR_OVERCURRENT;
     if (predVolt < minVoltage * predVoltThreshold) return ERROR_LOW_VOLTAGE;
     if (predCurr > maxCurrent * predCurrThreshold) return ERROR_OVERCURRENT;
     if (predPWM > predPWMThreshold) return ERROR_CRITICAL;
+    if (predTEMP2 > maxTempBattery * 0.9f) return ERROR_OVERHEAT_BATTERY;  // Упреждающий перегрев АКБ
     return ERROR_NONE;
 }
 
-int SystemLogic::adjustPWM(float effectivePWM, float predVolt, float predCurr, float voltage, float current) {
+
+int SystemLogic::adjustPWM(float effectivePWM, float predVolt, float predCurr, float voltage, float current, float predTEMP2, float temp2) {
     float targetPWM = static_cast<int>(effectivePWM / 1000.0f * 255.0f); // Конвертация μs в 0-255
 
     // Защита батареи: снижение ШИМ при низком напряжении
@@ -79,8 +83,11 @@ int SystemLogic::adjustPWM(float effectivePWM, float predVolt, float predCurr, f
     else if (predVolt > minVoltage && predCurr < maxCurrent * 0.7f && effectivePWM <= predPWMThreshold) {
         targetPWM = min(targetPWM + pwmAdjustStep, 255.0f);
     }
+    if (predTEMP2 > maxTempBattery * 0.9f || temp2 > maxTempBattery * 0.8f) {
+        targetPWM = max(targetPWM - pwmAdjustStep * 2, 0.0f);  // Усиленное понижение при перегреве АКБ
+    }
 
-    return constrain(static_cast<int>(targetPWM), 0, 255);
+    return constrain(static_cast<int>(targetPWM), 0, 255); // вот это надо тестить, потому что не факт что конвертация нужна 
 }
 
 float SystemLogic::calculateVibration(float ax, float ay, float az) {

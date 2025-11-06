@@ -9,20 +9,22 @@ void UARTComm::sendData(int16_t ax, int16_t ay, int16_t az,
                         int16_t gx, int16_t gy, int16_t gz, 
                         float temp1, float temp2, float temp3, 
                         float voltage, float current, 
-                        float pwm, int errorCode) {
+                        float pwm, int errorCode, float vibrationLevel) {
     serial.print("AX:"); serial.print((int16_t)(ax * 100)); serial.print(";");
     serial.print("AY:"); serial.print((int16_t)(ay * 100)); serial.print(";");
     serial.print("AZ:"); serial.print((int16_t)(az * 100)); serial.print(";");
     serial.print("GX:"); serial.print(gx); serial.print(";");
     serial.print("GY:"); serial.print(gy); serial.print(";");
     serial.print("GZ:"); serial.print(gz); serial.print(";");
-    serial.print("TEMP1:"); serial.print(temp1); serial.print(";");
-    serial.print("TEMP2:"); serial.print(temp2); serial.print(";");
-    serial.print("TEMP3:"); serial.print(temp3); serial.println(";");
+    serial.print("TEMP1:"); serial.print(temp1); serial.print(";"); // motor
+    serial.print("TEMP2:"); serial.print(temp2); serial.print(";"); // battery
+    serial.print("TEMP3:"); serial.print(temp3); serial.println(";"); // outside
+    serial.print("PWM:"); serial.print(pwm); serial.print(";");
     serial.print("VOLT:"); serial.print(voltage); serial.print(";");
     serial.print("CURR:"); serial.print(current); serial.println(";");
     serial.print("PWM:"); serial.print(pwm); serial.print(";");
     serial.print("ERR:"); serial.print(errorCode); serial.println(";");
+    serial.print("VIB:"); serial.print(vibrationLevel); serial.println(";");
     serial.flush();
 }
 

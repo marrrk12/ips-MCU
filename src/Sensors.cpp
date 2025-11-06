@@ -1,12 +1,14 @@
 // src/Sensors.cpp
 #include "Sensors.h"
 #include <EEPROM.h>  // Для STM32 — виртуальная EEPROM
+#include "Timer.h"
 
 Sensors::Sensors(int oneWirePin, int voltPin, int currPin)
     : oneWire(oneWirePin), dsSensors(&oneWire), voltagePin(voltPin), currentPin(currPin), mpu(0x68){
     pinMode(voltagePin, INPUT);
     pinMode(currentPin, INPUT);
 }
+
 bool Sensors::init() {
     Serial1.println("Sensors::init() START");
 
@@ -35,22 +37,11 @@ bool Sensors::init() {
 
     // Настройка диапазонов
     mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_8);
-    mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_500);
+    mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_1000);
+    mpu.setDLPFMode(MPU6050_DLPF_BW_98);
 
-    // === ЗАГРУЗКА КАЛИБРОВКИ ИЗ EEPROM ===
-    loadCalibrationFromEEPROM();
-
-    // === ИЛИ КАЛИБРОВКА ПРИ СТАРТЕ ===
-    // calibrateMPU();  
-
-    // if (!mpu.begin(0x68, &Wire)) {
-    //     Serial1.println("mpu FAIL");
-    //     return false;
-        
-    // }
-    // mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
-    // mpu.setGyroRange(MPU6050_RANGE_500_DEG);
-    // mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);  // Фильтр 21 Гц
+    loadCalibration();
+    applyOffsets();
     
     dsSensors.begin();
     for (uint8_t i = 0; i < 3; i++) {
@@ -67,71 +58,134 @@ bool Sensors::init() {
 }
 
 void Sensors::readMPU(float &ax, float &ay, float &az, float &gx, float &gy, float &gz) {
-    int16_t ax_raw, ay_raw, az_raw, gx_raw, gy_raw, gz_raw;
-    mpu.getMotion6(&ax_raw, &ay_raw, &az_raw, &gx_raw, &gy_raw, &gz_raw);
+    int16_t raw_ax, raw_ay, raw_az, raw_gx, raw_gy, raw_gz;
+    mpu.getMotion6(&raw_ax, &raw_ay, &raw_az, &raw_gx, &raw_gy, &raw_gz);
 
-    // ±8g → 4096 LSB/g
-    ax = ax_raw / 4096.0f;
-    ay = ay_raw / 4096.0f;
-    az = az_raw / 4096.0f;
+    ax = (raw_ax - offsets[0]) / 4096.0f;  // ±8g
+    ay = (raw_ay - offsets[1]) / 4096.0f;
+    az = (raw_az - offsets[2]) / 4096.0f;
+    gx = (raw_gx - offsets[3]) / 32.8f;    // ±1000°/s
+    gy = (raw_gy - offsets[4]) / 32.8f;
+    gz = (raw_gz - offsets[5]) / 32.8f;
 
-    // ±500 °/s → 65.5 LSB/°/s
-    gx = gx_raw / 65.5f;
-    gy = gy_raw / 65.5f;
-    gz = gz_raw / 65.5f;
+    // === ВИБРАЦИЯ ===
+    float acc_mag = sqrt(ax*ax + ay*ay + az*az);
+    float g_force = acc_mag;
+    float vib_g = fabs(g_force - 1.0f);
+
+    sumSq += (long)(vib_g * 1000);
+    samples++;
+
+    uint32_t now = millis();
+    if (now - lastVibTime >= VIB_WINDOW_MS) {
+        float rms_g = sqrt((float)sumSq / samples) / 1000.0f;
+        vibrationLevel = constrain(rms_g * 100, 0, 100);
+        vibrationDetected = (vibrationLevel > VIB_THRESHOLD);
+
+        sumSq = 0; samples = 0; lastVibTime = now;
+    }
 }   
 
+float Sensors::getVibrationLevel() { return vibrationLevel; }
+bool Sensors::isVibrationDetected() { return vibrationDetected; }
+
 void Sensors::calibrateMPU() {
-    Serial1.println("MPU CALIBRATION START (6 iterations)");
+    Serial1.println("MPU CALIBRATION START");
 
-    // Калибровка акселерометра
-    mpu.CalibrateAccel(6);
-    Serial1.println("Accel calibrated");
 
-    // Калибровка гироскопа
-    mpu.CalibrateGyro(6);
-    Serial1.println("Gyro calibrated");
+    int mean_ax, mean_ay, mean_az, mean_gx, mean_gy, mean_gz;
+    int ax_o = 0, ay_o = 0, az_o = 0, gx_o = 0, gy_o = 0, gz_o = 0;
 
-    // Сохраняем в EEPROM
-    saveCalibrationToEEPROM();
+    mpu.setXAccelOffset(0); mpu.setYAccelOffset(0); mpu.setZAccelOffset(0);
+    mpu.setXGyroOffset(0); mpu.setYGyroOffset(0); mpu.setZGyroOffset(0);
+
+    meansensors(&mean_ax, &mean_ay, &mean_az, &mean_gx, &mean_gy, &mean_gz);
+
+    ax_o = -mean_ax / 8;
+    ay_o = -mean_ay / 8;
+    az_o = (4096 - mean_az) / 8;  // ±8g
+    gx_o = -mean_gx / 4;
+    gy_o = -mean_gy / 4;
+    gz_o = -mean_gz / 4;
+
+    // Итерации
+    for (int i = 0; i < 50; i++) {
+        mpu.setXAccelOffset(ax_o); mpu.setYAccelOffset(ay_o); mpu.setZAccelOffset(az_o);
+        mpu.setXGyroOffset(gx_o); mpu.setYGyroOffset(gy_o); mpu.setZGyroOffset(gz_o);
+        meansensors(&mean_ax, &mean_ay, &mean_az, &mean_gx, &mean_gy, &mean_gz);
+
+        if (abs(mean_ax) > 8) ax_o -= mean_ax / 8;
+        if (abs(mean_ay) > 8) ay_o -= mean_ay / 8;
+        if (abs(4096 - mean_az) > 8) az_o += (4096 - mean_az) / 8;
+        if (abs(mean_gx) > 2) gx_o -= mean_gx / 4;
+        if (abs(mean_gy) > 2) gy_o -= mean_gy / 4;
+        if (abs(mean_gz) > 2) gz_o -= mean_gz / 4;
+        delay(2);
+    }
+
+    offsets[0] = ax_o; offsets[1] = ay_o; offsets[2] = az_o;
+    offsets[3] = gx_o; offsets[4] = gy_o; offsets[5] = gz_o;
+    EEPROM.put(EEPROM_START, offsets);
+    applyOffsets();
+
     Serial1.println("CALIBRATION SAVED TO EEPROM");
 }
 
-void Sensors::saveCalibrationToEEPROM() {
-    int16_t offsets[6];
-    offsets[0] = mpu.getXAccelOffset();
-    offsets[1] = mpu.getYAccelOffset();
-    offsets[2] = mpu.getZAccelOffset();
-    offsets[3] = mpu.getXGyroOffset();
-    offsets[4] = mpu.getYGyroOffset();
-    offsets[5] = mpu.getZGyroOffset();
-
-    EEPROM.put(0, offsets);
-    Serial1.println("Calibration saved to EEPROM");
+void Sensors::loadCalibration() {
+  EEPROM.get(EEPROM_START, offsets);
+  if (offsets[0] < -30000 || offsets[0] > 30000) {
+    Serial.println("Нет калибровки. Отправь 'c'.");
+    memset(offsets, 0, sizeof(offsets));
+  } else {
+    Serial.println("Калибровка загружена.");
+  }
 }
-void Sensors::loadCalibrationFromEEPROM() {
-    int16_t offsets[6];
-    EEPROM.get(0, offsets);
 
-    // Проверка валидности (опционально)
-    if (offsets[0] != 0xFFFF && offsets[0] != 0) {
-        mpu.setXAccelOffset(offsets[0]);
-        mpu.setYAccelOffset(offsets[1]);
-        mpu.setZAccelOffset(offsets[2]);
-        mpu.setXGyroOffset(offsets[3]);
-        mpu.setYGyroOffset(offsets[4]);
-        mpu.setZGyroOffset(offsets[5]);
-        Serial1.println("Calibration loaded from EEPROM");
-    } else {
-        Serial1.println("No valid calibration in EEPROM");
+void Sensors::applyOffsets() {
+  mpu.setXAccelOffset(offsets[0]);
+  mpu.setYAccelOffset(offsets[1]);
+  mpu.setZAccelOffset(offsets[2]);
+  mpu.setXGyroOffset(offsets[3]);
+  mpu.setYGyroOffset(offsets[4]);
+  mpu.setZGyroOffset(offsets[5]);
+}
+
+void Sensors::meansensors(int* max, int* may, int* maz, int* mgx, int* mgy, int* mgz) {
+  long sum_ax = 0, sum_ay = 0, sum_az = 0;
+  long sum_gx = 0, sum_gy = 0, sum_gz = 0;
+  int16_t tax, tay, taz, tgx, tgy, tgz;
+
+  int count = BUFFER_SIZE + 100;
+  Timer sampleTimer(2, true);  
+
+  for (int i = 0; i < count; i++) {
+    mpu.getMotion6(&tax, &tay, &taz, &tgx, &tgy, &tgz);
+    if (i >= 100) {
+      sum_ax += tax; sum_ay += tay; sum_az += taz;
+      sum_gx += tgx; sum_gy += tgy; sum_gz += tgz;
     }
+    while (!sampleTimer.update()) {
+            // Можно выполнять другие задачи здесь
+            // HAL_IWDG_Refresh(&hiwdg); // Обновляем Watchdog
+        }
+  }
+
+  *max = sum_ax / BUFFER_SIZE;
+  *may = sum_ay / BUFFER_SIZE;
+  *maz = sum_az / BUFFER_SIZE;
+  *mgx = sum_gx / BUFFER_SIZE;
+  *mgy = sum_gy / BUFFER_SIZE;
+  *mgz = sum_gz / BUFFER_SIZE;
 }
+
+void Sensors::saveCalibrationToEEPROM() { EEPROM.put(EEPROM_START, offsets); }
+
 
 void Sensors::readDS(float &temp1, float &temp2, float &temp3) {
     dsSensors.requestTemperatures();
-    temp1 = dsSensors.getTempC(dsAddresses[0]);
-    temp2 = dsSensors.getTempC(dsAddresses[1]);
-    temp3 = dsSensors.getTempC(dsAddresses[2]);
+    temp1 = dsSensors.getTempC(dsAddresses[0]); // motor
+    temp2 = dsSensors.getTempC(dsAddresses[1]); // battery
+    temp3 = dsSensors.getTempC(dsAddresses[2]); // outside
 }
 
 float Sensors::readVoltage() {

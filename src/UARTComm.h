@@ -18,7 +18,7 @@ public:
         int16_t gx, int16_t gy, int16_t gz, 
         float temp1, float temp2, float temp3, 
         float voltage, float current, float pwm,
-        int errorCode = -1);  // Отправка форматированных данных
+        int errorCode, float vibrationLevel);  // Отправка форматированных данных
 
     bool receiveForecast(float& predAX, float& predAY, float& predAZ, 
                         float& predGX, float& predGY, float& predGZ,

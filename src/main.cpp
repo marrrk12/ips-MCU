@@ -2,25 +2,31 @@
 #include "UARTComm.h"
 #include "MotorControl.h"
 #include "SystemLogic.h"
+#include "Timer.h"
+
+// Создаем таймеры для разных задач
 
 #define LED_PIN PC13
 
-#include "stm32f1xx_hal.h"         
-IWDG_HandleTypeDef hiwdg;
+// #include "stm32f1xx_hal.h"         
+// IWDG_HandleTypeDef hiwdg;
 
 Sensors sensors(PA1, PB0, PA7);  // Пин для 1-Wire, напряжение, ток
 HardwareSerial Serial1(PA10, PA9); // Uart to RPI
 UARTComm uart(Serial1);  // Используем существующий Serial1
 MotorControl motorControl(PA8, 100.0f); // PWM
 SystemLogic systemLogic(sensors, motorControl, uart, BATTERY_TYPE);  // Логика системы
+Timer mainLoopTimer(500, true);      // Основной цикл - 500мс
+Timer uartSendTimer(100, true);      // Отправка данных - 100мс
+
 
 
 void setup() {
     pinMode(LED_PIN, OUTPUT); // Инициализация светодиода
     digitalWrite(LED_PIN, HIGH); // Выключен (инвертированная логика на PC13)
     pinMode(PB8, INPUT); // Вход для ШИМ от полётного контроллера
-    pinMode(PB6, INPUT_PULLUP);
-    pinMode(PB7, INPUT_PULLUP);
+    // pinMode(PB6, INPUT_PULLUP);
+    // pinMode(PB7, INPUT_PULLUP);
     Serial1.begin(115200);
 
     // // IWDG: 5 секунд
@@ -47,32 +53,36 @@ void setup() {
     if (!sensors.init()) {
         Serial1.println("INIT FAILED");
         while (1) {
-            digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-            delay(100);
-            // HAL_IWDG_Refresh(&hiwdg);
+            if (uartSendTimer.update()){
+
+                digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+                // delay(100);
+                // HAL_IWDG_Refresh(&hiwdg);
+                
+            }
         }
     }
     Serial1.println("SYSTEM READY");
 
-    // КАЛИБРОВКА ПО КОМАНДЕ (опционально)
-    // sensors.calibrateMPU();
 }
 
 void loop() {
-    Serial1.println("LOOP START");
-    
-    if (Serial1.available()) {
-        String cmd = Serial1.readStringUntil('\n');
-        cmd.trim();
-        if (cmd == "CALIBRATE") {
-            Serial1.println("STARTING CALIBRATION...");
-            sensors.calibrateMPU();
-            Serial1.println("CALIBRATION DONE & SAVED");
+     if (mainLoopTimer.update()) {
+        Serial1.println("LOOP START");
+        
+        if (Serial1.available()) {
+            String cmd = Serial1.readStringUntil('\n');
+            cmd.trim();
+            if (cmd == "c") {
+                Serial1.println("STARTING CALIBRATION...");
+                sensors.calibrateMPU();
+                Serial1.println("CALIBRATION DONE & SAVED");
+            }
         }
-    }
 
-    systemLogic.update();  // Обновление логики
-    // HAL_IWDG_Refresh(&hiwdg);
-    delay(500);  // Задержка для стабильности
-    Serial1.println("LOOP END");
+        systemLogic.update();  // Обновление логики
+        // HAL_IWDG_Refresh(&hiwdg);
+        // delay(500);  // Задержка для стабильности
+        Serial1.println("LOOP END");
+    }
 }

@@ -2,14 +2,25 @@
 #ifndef SENSORS_H
 #define SENSORS_H
 
+#include <Arduino.h>
+// #include <Adafruit_MPU6050.h>
+// #include <Adafruit_Sensor.h>
+#include <Wire.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <I2Cdev.h>
+#include <MPU6050.h>
+#include <EEPROM.h>
+
+
 // Настраиваемые значения (изменяйте здесь для испытаний/полётов)
 #define R1_VOLTAGE 300000.0f  // R1 в делителе напряжения
-#define R2_VOLTAGE 20000.0f   // R2: 20000 для испытаний (21В), 51000 для полётов (21-48В)
+#define R2_VOLTAGE 51000.0f   // R2: 20000 для испытаний (21В), 51000 для полётов (21-48В)
 
 // Для ACS758 (питание 5В)
-#define ACS_QUIESCENT 0.6f    // Quiescent Vout при 5В
-#define ACS_SENS 0.04f        // Чувствительность 40мВ/А
-#define ACS_DIVIDER_SCALE 2.0f  // Масштаб делителя Vout (например, 2 для 10k/10k делителя, чтобы 5В→2.5В)
+#define ACS_QUIESCENT       0.6f    // Quiescent Vout при 5В
+#define ACS_SENS            0.04f        // Чувствительность 40мВ/А
+#define ACS_DIVIDER_SCALE   2.0f  // Масштаб делителя Vout (например, 2 для 10k/10k делителя, чтобы 5В→2.5В)
 
 #define BATTERY_5S   0  // Испытания: 21В номинал, min=18.5В
 #define BATTERY_10S  1  // Полёты: 42В номинал, min=37В
@@ -21,14 +32,13 @@
 #define MIN_VOLTAGE_5S  18.5f
 #define MIN_VOLTAGE_10S 37.0f
 
-#include <Arduino.h>
-// #include <Adafruit_MPU6050.h>
-// #include <Adafruit_Sensor.h>
-#include <Wire.h>
-#include <OneWire.h>
-#include <DallasTemperature.h>
-#include "I2Cdev.h"
-#include "MPU6050.h"  // Jeff Rowberg
+#define VIB_WINDOW_MS   100
+#define VIB_THRESHOLD   3    // порог вибраций
+#define VIB_AXIS        2
+#define EEPROM_START    0
+#define BUFFER_SIZE     300
+
+
 
 class Sensors {
 private:
@@ -40,6 +50,19 @@ private:
     int voltagePin;  // Пин для напряжения (делитель)
     int currentPin;  // Пин для тока (ACS758)
 
+    // Вибрация
+    long sumSq = 0;
+    int samples = 0;
+    uint32_t lastVibTime = 0;
+    float vibrationLevel = 0;
+    bool vibrationDetected = false;
+
+    int16_t offsets[6];
+
+    void loadCalibration();
+    void applyOffsets();
+    void meansensors(int* max, int* may, int* maz, int* mgx, int* mgy, int* mgz);
+
 public:
     Sensors(int oneWirePin, int voltPin, int currPin);  // Конструктор
     bool init();  // Инициализация с проверкой
@@ -48,10 +71,10 @@ public:
     float readVoltage();  // Напряжение с делителя
     float readCurrent();  // Ток с ACS758
 
-    // Калибровка (вызывать по кнопке или при старте)
-    void calibrateMPU();
-    void saveCalibrationToEEPROM();  // Опционально
-    void loadCalibrationFromEEPROM(); // Опционально
+    float getVibrationLevel();     // 0–100
+    bool isVibrationDetected();    // > порог
+    void calibrateMPU();           // По команде 'c'
+    void saveCalibrationToEEPROM();
 };
 
 #endif
