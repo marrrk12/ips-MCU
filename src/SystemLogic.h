@@ -6,6 +6,8 @@
 #include "UARTComm.h"
 #include "MotorControl.h"
 
+#define EMERGENCY_PWM 1500  // Предполагаемый ШИМ для экстренных ситуаций
+
 class SystemLogic {
 private:
     Sensors& sensors;
@@ -29,7 +31,6 @@ private:
     unsigned long ledNextToggle = 0; // Время следующего переключения
     const int INPUT_PWM_PIN = PB8; // Пин для входного ШИМ от полётного контроллера
     float maxTempBattery = 50.0f;  // Максимальная температура АКБ (°C)
-    static const int ERROR_OVERHEAT_BATTERY = -7;  // Новая ошибка для АКБ
     float readInputPWM(); // Чтение ШИМ (μs)
     void updateLED(int errorCode, bool uartOk);
     void ledBlinkPattern(int blinks, int onTime, int offTime, int cycleTime);
@@ -38,13 +39,14 @@ public:
     SystemLogic(Sensors& sens, MotorControl& mot, UARTComm& u, int batteryType);
     void update();  // Обновление логики
     // Коды ошибок (зарезервированные значения для sendData)
-    static const int ERROR_NONE = -1;           // Нормальная работа
-    static const int ERROR_OVERHEAT = -2;       // Перегрев >50°C
-    static const int ERROR_HIGH_VIBRATION = -3; // Вибрация >15 m/s²
-    static const int ERROR_LOW_VOLTAGE = -4;    // Напряжение <В
-    static const int ERROR_OVERCURRENT = -5;    // Ток >100A
-    static const int ERROR_INIT_FAIL = -6;      // Ошибка инициализации
-    static const int ERROR_CRITICAL = -999;     // Критическая ошибка
+    static const int ERROR_NONE = -1;                   // Нормальная работа
+    static const int ERROR_OVERHEAT_MOTOR = -2;         // Перегрев >50°C
+    static const int ERROR_HIGH_VIBRATION = -3;         // Вибрация >15 m/s²
+    static const int ERROR_LOW_VOLTAGE = -4;            // Напряжение <В
+    static const int ERROR_OVERCURRENT = -5;            // Ток >100A
+    static const int ERROR_INIT_FAIL = -6;              // Ошибка инициализации
+    static const int ERROR_OVERHEAT_BATTERY = -7;       // Новая ошибка для АКБ
+    static const int ERROR_CRITICAL = -999;             // Критическая ошибка
 
 
 private:

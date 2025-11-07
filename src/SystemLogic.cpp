@@ -28,7 +28,8 @@ void SystemLogic::update() {
     // Комбинируем inputPWM и predPWM (например, берём минимум для безопасности)
     float effectivePWM = useForecast ? min(inputPWM, predPWM) : inputPWM;
 
-    int errorCode = getErrorCode(temp1, temp2, temp3, vibration, voltage, current, predVOLT, predCURR, predPWM, predTEMP2);
+    int errorCode = -1; 
+    errorCode = getErrorCode(temp1, temp2, temp3, vibration, voltage, current, predVOLT, predCURR, predPWM, predTEMP2);
     int targetPWM = useForecast ? adjustPWM(effectivePWM, predVOLT, predCURR, voltage, current, predTEMP2, temp2) 
     : adjustPWM(motor.getCurrentPWM() * 1000.0f, voltage, current, voltage, current, predTEMP2, temp2);
     bool motorOk = motor.setPWM(targetPWM);
@@ -36,15 +37,15 @@ void SystemLogic::update() {
     // Обновление светодиода с приоритетом ошибок
     updateLED(errorCode, uartOk && motorOk);
 
-    if (errorCode != ERROR_NONE || !motorOk) {
-        motor.setPWM(0);
-        analogWrite(PA8, 0);
-    }
+    // if (errorCode != ERROR_NONE || !motorOk) {
+    //     motor.setPWM(EMERGENCY_PWM);
+    //     analogWrite(PA8, EMERGENCY_PWM);
+    // }
 
     float pwm_value = motor.getCurrentPWM() * 1000.0f;
     uart.sendData(static_cast<int16_t>(ax * 100), static_cast<int16_t>(ay * 100), static_cast<int16_t>(az * 100),
                   static_cast<int16_t>(gx * 100), static_cast<int16_t>(gy * 100), static_cast<int16_t>(gz * 100),
-                  temp1, temp2, temp3, voltage, current, pwm_value, errorCode, vibration);
+                  temp1, temp2, temp3, voltage, current, pwm_value, vibration, errorCode);
 }
 
 float SystemLogic::readInputPWM() {
@@ -55,7 +56,7 @@ float SystemLogic::readInputPWM() {
 
 int SystemLogic::getErrorCode(float temp1, float temp2, float temp3, float vibration, float voltage, float current, float predVolt, float predCurr, float predPWM, float predTEMP2) {
     if (temp2 > maxTempBattery) return ERROR_OVERHEAT_BATTERY;  // АКБ перегрев
-    if (temp1 > maxTemp) return ERROR_OVERHEAT;
+    if (temp1 > maxTemp) return ERROR_OVERHEAT_MOTOR;
     // if (vibration > maxVibration) return ERROR_HIGH_VIBRATION;
     if (sensors.isVibrationDetected()) return ERROR_HIGH_VIBRATION;
     if (voltage < minVoltage) return ERROR_LOW_VOLTAGE;

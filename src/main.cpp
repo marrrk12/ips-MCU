@@ -68,7 +68,7 @@ void setup() {
 
 void loop() {
      if (mainLoopTimer.update()) {
-        Serial1.println("LOOP START");
+        // Serial1.println("LOOP START");
         
         if (Serial1.available()) {
             String cmd = Serial1.readStringUntil('\n');
@@ -83,6 +83,6 @@ void loop() {
         systemLogic.update();  // Обновление логики
         // HAL_IWDG_Refresh(&hiwdg);
         // delay(500);  // Задержка для стабильности
-        Serial1.println("LOOP END");
+        // Serial1.println("LOOP END");
     }
 }
