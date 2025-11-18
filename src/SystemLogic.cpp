@@ -102,7 +102,7 @@ float SystemLogic::calculateVibration(float ax, float ay, float az) {
     static float filtered = 0.0f;
     const float alpha = 0.7f;
     filtered = alpha * filtered + (1.0f - alpha) * vibration;
-    Serial1.println("MPU filtred vibronation: " + String(filtered) + "");
+    Serial.println("MPU filtred vibronation: " + String(filtered) + "");
     return filtered;
 }
 

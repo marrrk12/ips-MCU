@@ -12,8 +12,8 @@
 // IWDG_HandleTypeDef hiwdg;
 
 Sensors sensors(PA1, PB0, PA7);  // Пин для 1-Wire, напряжение, ток
-HardwareSerial Serial1(PA10, PA9); // Uart to RPI
-UARTComm uart(Serial1);  // Используем существующий Serial1
+// HardwareSerial Serial1(PA10, PA9); // Uart to RPI
+UARTComm uart(Serial);  // Используем существующий Serial1
 MotorControl motorControl(PA8, 100.0f); // PWM
 SystemLogic systemLogic(sensors, motorControl, uart, BATTERY_TYPE);  // Логика системы
 Timer mainLoopTimer(500, true);      // Основной цикл - 500мс
@@ -27,7 +27,7 @@ void setup() {
     pinMode(PB8, INPUT); // Вход для ШИМ от полётного контроллера
     // pinMode(PB6, INPUT_PULLUP);
     // pinMode(PB7, INPUT_PULLUP);
-    Serial1.begin(115200);
+    Serial.begin(115200);
 
     // // IWDG: 5 секунд
     // hiwdg.Instance = IWDG;
@@ -36,22 +36,22 @@ void setup() {
     // HAL_IWDG_Init(&hiwdg);
 
     // Тест UART: "живой"
-    Serial1.println("IPS-MCU START");
+    Serial.println("IPS-MCU START");
 
-    Serial1.println("I2C SCAN...");
+    Serial.println("I2C SCAN...");
     for (uint8_t addr = 1; addr < 127; addr++) {
         Wire.beginTransmission(addr);
         if (Wire.endTransmission() == 0) {
-            Serial1.print("Found I2C: 0x");
-            if (addr < 16) Serial1.print("0");
-            Serial1.println(addr, HEX);
+            Serial.print("Found I2C: 0x");
+            if (addr < 16) Serial.print("0");
+            Serial.println(addr, HEX);
         }
         // HAL_IWDG_Refresh(&hiwdg);
     }
-    Serial1.println("SCAN DONE");
+    Serial.println("SCAN DONE");
 
     if (!sensors.init()) {
-        Serial1.println("INIT FAILED");
+        Serial.println("INIT FAILED");
         while (1) {
             if (uartSendTimer.update()){
 
@@ -62,27 +62,27 @@ void setup() {
             }
         }
     }
-    Serial1.println("SYSTEM READY");
+    Serial.println("SYSTEM READY");
 
 }
 
 void loop() {
      if (mainLoopTimer.update()) {
-        // Serial1.println("LOOP START");
+        // Serial.println("LOOP START");
         
-        if (Serial1.available()) {
-            String cmd = Serial1.readStringUntil('\n');
+        if (Serial.available()) {
+            String cmd = Serial.readStringUntil('\n');
             cmd.trim();
             if (cmd == "c") {
-                Serial1.println("STARTING CALIBRATION...");
+                Serial.println("STARTING CALIBRATION...");
                 sensors.calibrateMPU();
-                Serial1.println("CALIBRATION DONE & SAVED");
+                Serial.println("CALIBRATION DONE & SAVED");
             }
         }
 
         systemLogic.update();  // Обновление логики
         // HAL_IWDG_Refresh(&hiwdg);
         // delay(500);  // Задержка для стабильности
-        // Serial1.println("LOOP END");
+        // Serial.println("LOOP END");
     }
 }

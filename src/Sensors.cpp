@@ -10,7 +10,7 @@ Sensors::Sensors(int oneWirePin, int voltPin, int currPin)
 }
 
 bool Sensors::init() {
-    Serial1.println("Sensors::init() START");
+    Serial.println("Sensors::init() START");
 
         // Включаем подтяжки (на всякий случай)
     pinMode(PB6, INPUT_PULLUP);
@@ -19,21 +19,21 @@ bool Sensors::init() {
     Wire.begin();  // Инициализация I2C
     Wire.setClock(100000);  // 100 kHz — надёжно
 
-    Serial1.println("Wire.begin() OK");
+    Serial.println("Wire.begin() OK");
 
     mpu.initialize();
-    Serial1.println("mpu.initialize() OK");
+    Serial.println("mpu.initialize() OK");
 
     bool connected = mpu.testConnection();
-    Serial1.print("mpu.testConnection(): ");
-    Serial1.println(connected ? "OK" : "FAILED");
+    Serial.print("mpu.testConnection(): ");
+    Serial.println(connected ? "OK" : "FAILED");
 
     if (!connected) {
-        Serial1.println("MPU6050 NOT RESPONDING!");
+        Serial.println("MPU6050 NOT RESPONDING!");
         return false;
     }
     
-    Serial1.println("MPU6050 CONNECTED");
+    Serial.println("MPU6050 CONNECTED");
 
     // Настройка диапазонов
     mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_8);
@@ -46,14 +46,14 @@ bool Sensors::init() {
     dsSensors.begin();
     for (uint8_t i = 0; i < 3; i++) {
         if (!dsSensors.getAddress(dsAddresses[i], i)) {
-            Serial1.print("DS18B20 #");
-            Serial1.print(i);
-            Serial1.println(" NOT FOUND");
+            Serial.print("DS18B20 #");
+            Serial.print(i);
+            Serial.println(" NOT FOUND");
             return false;
         }
     }
 
-    Serial1.println("Sensors::init() SUCCESS");
+    Serial.println("Sensors::init() SUCCESS");
     return true;
 }
 
@@ -90,7 +90,7 @@ float Sensors::getVibrationLevel() { return vibrationLevel; }
 bool Sensors::isVibrationDetected() { return vibrationDetected; }
 
 void Sensors::calibrateMPU() {
-    Serial1.println("MPU CALIBRATION START");
+    Serial.println("MPU CALIBRATION START");
 
 
     int mean_ax, mean_ay, mean_az, mean_gx, mean_gy, mean_gz;
@@ -128,7 +128,7 @@ void Sensors::calibrateMPU() {
     EEPROM.put(EEPROM_START, offsets);
     applyOffsets();
 
-    Serial1.println("CALIBRATION SAVED TO EEPROM");
+    Serial.println("CALIBRATION SAVED TO EEPROM");
 }
 
 void Sensors::loadCalibration() {
@@ -189,17 +189,66 @@ void Sensors::readDS(float &temp1, float &temp2, float &temp3) {
 }
 
 float Sensors::readVoltage() {
-    int analogValue = analogRead(voltagePin);  // 0-4095
-    float voltageOut = (analogValue * 3.3f) / 4095.0f;  // V_out при 3.3V ADC
-    float voltageIn = voltageOut / (R2_VOLTAGE / (R1_VOLTAGE + R2_VOLTAGE));  // V_in батареи (настраиваемо)
+    const int samples = 50;
+    long sum = 0;
+
+    for (int i = 0; i < samples; i++) {
+        sum += analogRead(voltagePin);
+        delay(1);
+    }
+
+    int analogValue = sum / samples;
+    float voltageOut = (analogValue * V_REF_CALIB) / 4095.0f * ADC_CALIB;
+    float dividerRatio = R2_VOLTAGE / (R1_VOLTAGE + R2_VOLTAGE);
+    float voltageIn = voltageOut / dividerRatio;
+
+    
+    // Serial.print("Analog: "); Serial.print(analogValue);
+    // Serial.print(" | V_out: "); Serial.print(voltageOut, 3);
+    // Serial.print("V | V_in: "); Serial.print(voltageIn, 2);
+    // Serial.println("V");
+
     return voltageIn;
 }
 
 float Sensors::readCurrent() { 
-    int analogValue = analogRead(currentPin);  // 0-4095
-    float voltageOut = (analogValue * 3.3f) / 4095.0f;  // V_out от ADC
-    voltageOut *= ACS_DIVIDER_SCALE;  // Коррекция за делитель (если есть, иначе 1.0f)
-    float current = (voltageOut - ACS_QUIESCENT) / ACS_SENS;  // Формула для униполярного ACS758 на 5В
-    return current;
+    const int samples = 50;
+    long sum = 0;
+
+    for (int i = 0; i < samples; i++) {
+        sum += analogRead(currentPin);
+        delay(1);
+    }
+    int analogValue = sum / samples;  // 0-4095
+    float voltage = (analogValue * V_REF_CALIB) / 4095.0f * ADC_CALIB;  // V_out от ADC
+    
+    // === АВТОКАЛИБРОВКА НУЛЯ (один раз при старте) ===
+    static bool zeroCalibrated = false;
+    static float zeroOffsetVoltage = 1.65f;  // начальное значение
+
+    if (!zeroCalibrated) {
+        // Ждём 2 секунды после старта, чтобы ток был 0
+        static uint32_t startTime = millis();
+        if (millis() - startTime > 2000) {
+            zeroOffsetVoltage = voltage;
+            Serial1.print("Ток: нулевое напряжение = ");
+            Serial1.print(zeroOffsetVoltage, 4);
+            Serial1.println("V");
+            zeroCalibrated = true;
+        }
+    }
+    // === ОСНОВНАЯ ФОРМУЛА ===
+    float rawCurrent = -(voltage - zeroOffsetVoltage) / ACS_SENS;
+
+    // === ЛИНЕЙНАЯ КАЛИБРОВКА (по твоим данным) ===
+    const float CALIBRATION_SCALE = 2.222f;   // 1 / 0.45
+    const float CALIBRATION_OFFSET = 0.222f;  // 0.1 / 0.45
+
+    float calibratedCurrent = (rawCurrent + CALIBRATION_OFFSET) * CALIBRATION_SCALE;
+
+    // Ограничение
+    if (calibratedCurrent < 0) calibratedCurrent = 0;
+
+    return calibratedCurrent;
 }
 
