@@ -1,8 +1,8 @@
 // src/SystemLogic.cpp
 #include "SystemLogic.h"
 
-SystemLogic::SystemLogic(Sensors& sens, MotorControl& mot, UARTComm& u, int batteryType) :
-    sensors(sens), motor(mot), uart(u), maxCurrent(mot.getMaxCurrent()) {
+SystemLogic::SystemLogic(Sensors& sens, MotorControl& mot, UARTComm& u, int batteryType, int inputPWM_Pin) :
+    sensors(sens), motor(mot), uart(u), maxCurrent(mot.getMaxCurrent()), inputPWM_PIN(inputPWM_Pin) {
     minVoltage = (batteryType == BATTERY_5S) ? MIN_VOLTAGE_5S : MIN_VOLTAGE_10S;
 }
 
@@ -24,6 +24,7 @@ void SystemLogic::update() {
     bool uartOk = useForecast;
 
     // Чтение ШИМ от полётного контроллера
+    pinMode(inputPWM_PIN, INPUT); // Вход для ШИМ от полётного контроллера
     float inputPWM = readInputPWM(); // В μs
     // Комбинируем inputPWM и predPWM (например, берём минимум для безопасности)
     float effectivePWM = useForecast ? min(inputPWM, predPWM) : inputPWM;
@@ -49,7 +50,7 @@ void SystemLogic::update() {
 }
 
 float SystemLogic::readInputPWM() {
-    unsigned long pulse = pulseIn(INPUT_PWM_PIN, HIGH, 25000); // Ожидаем импульс до 25 мс
+    unsigned long pulse = pulseIn(inputPWM_PIN, HIGH, 25000); // Ожидаем импульс до 25 мс
     if (pulse == 0) return motor.getCurrentPWM() * 1000.0f; // Если нет сигнала, вернуть текущий ШИМ
     return constrain(pulse, 1000.0f, 2000.0f); // Ограничиваем 1000–2000 μs
 }
@@ -166,3 +167,6 @@ void SystemLogic::ledBlinkPattern(int blinks, int onTime, int offTime, int cycle
         }
     }
 }
+
+
+

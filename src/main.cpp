@@ -15,7 +15,7 @@ Sensors sensors(PA1, PB0, PA7);  // Пин для 1-Wire, напряжение, 
 // HardwareSerial Serial1(PA10, PA9); // Uart to RPI
 UARTComm uart(Serial);  // Используем существующий Serial1
 MotorControl motorControl(PA8, 100.0f); // PWM
-SystemLogic systemLogic(sensors, motorControl, uart, BATTERY_TYPE);  // Логика системы
+SystemLogic systemLogic(sensors, motorControl, uart, BATTERY_TYPE, PB8);  // Логика системы
 Timer mainLoopTimer(500, true);      // Основной цикл - 500мс
 Timer uartSendTimer(100, true);      // Отправка данных - 100мс
 
@@ -24,7 +24,7 @@ Timer uartSendTimer(100, true);      // Отправка данных - 100мс
 void setup() {
     pinMode(LED_PIN, OUTPUT); // Инициализация светодиода
     digitalWrite(LED_PIN, HIGH); // Выключен (инвертированная логика на PC13)
-    pinMode(PB8, INPUT); // Вход для ШИМ от полётного контроллера
+
     // pinMode(PB6, INPUT_PULLUP);
     // pinMode(PB7, INPUT_PULLUP);
     Serial.begin(115200);

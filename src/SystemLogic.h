@@ -29,14 +29,19 @@ private:
     int lastErrorCode = ERROR_NONE; // Добавляем
     bool lastSystemOk = true; // Добавляем
     unsigned long ledNextToggle = 0; // Время следующего переключения
-    const int INPUT_PWM_PIN = PB8; // Пин для входного ШИМ от полётного контроллера
     float maxTempBattery = 50.0f;  // Максимальная температура АКБ (°C)
+    // const int INPUT_PWM_PIN = PB8; // Пин для входного ШИМ от полётного контроллера
+    int inputPWM_PIN;  // Пин для входного ШИМ от полётного контроллера (теперь через конструктор)
     float readInputPWM(); // Чтение ШИМ (μs)
     void updateLED(int errorCode, bool uartOk);
     void ledBlinkPattern(int blinks, int onTime, int offTime, int cycleTime);
+    float calculateVibration(float ax, float ay, float az);  // Расчёт вибраций
+    int getErrorCode(float temp1, float temp2, float temp3, float vibration, float voltage, float current, float predVolt, float predCurr, float predPWM, float predTEMP2);
+    int adjustPWM(float effectivePWM, float predVolt, float predCurr, float voltage, float current, float predTEMP2, float temp2);
+
 
 public:
-    SystemLogic(Sensors& sens, MotorControl& mot, UARTComm& u, int batteryType);
+    SystemLogic(Sensors& sens, MotorControl& mot, UARTComm& u, int batteryType, int INPUT_PWM_PIN);
     void update();  // Обновление логики
     // Коды ошибок (зарезервированные значения для sendData)
     static const int ERROR_NONE = -1;                   // Нормальная работа
@@ -48,11 +53,6 @@ public:
     static const int ERROR_OVERHEAT_BATTERY = -7;       // Новая ошибка для АКБ
     static const int ERROR_CRITICAL = -999;             // Критическая ошибка
 
-
-private:
-    float calculateVibration(float ax, float ay, float az);  // Расчёт вибраций
-    int getErrorCode(float temp1, float temp2, float temp3, float vibration, float voltage, float current, float predVolt, float predCurr, float predPWM, float predTEMP2);
-    int adjustPWM(float effectivePWM, float predVolt, float predCurr, float voltage, float current, float predTEMP2, float temp2);
 
 };
 
