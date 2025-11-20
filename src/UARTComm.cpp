@@ -10,8 +10,12 @@ uint8_t crc8(const uint8_t *data, size_t len) {
     for (size_t i = 0; i < len; i++) {
         crc ^= data[i];
         for (int j = 0; j < 8; j++) {
-            crc = (crc & 0x80) ? ((crc << 1) ^ 0x07) : (crc << 1);
+            if (crc & 0x80)
+                crc = (crc << 1) ^ 0x07;
+            else
+                crc <<= 1;
         }
+        crc &= 0xFF;
     }
     return crc;
 }

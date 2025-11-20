@@ -3,10 +3,24 @@
 
 SystemLogic::SystemLogic(Sensors& sens, MotorControl& mot, UARTComm& u, int batteryType, int inputPWM_Pin) :
     sensors(sens), motor(mot), uart(u), maxCurrent(mot.getMaxCurrent()), inputPWM_PIN(inputPWM_Pin) {
+
     minVoltage = (batteryType == BATTERY_5S) ? MIN_VOLTAGE_5S : MIN_VOLTAGE_10S;
+    // Инициализация LED
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, HIGH); // Выключен по умолчанию
+
+}
+
+void SystemLogic::begin() {
+    motor.begin();
+    // Можно задать стартовый режим
+    motor.setMode(MotorControl::MODE_BYPASS);
+    Serial.println("SystemLogic: NORMAL MODE активирован");
 }
 
 void SystemLogic::update() {
+    
+
     float ax, ay, az, gx, gy, gz;
     float temp1, temp2, temp3;
     float voltage = sensors.readVoltage();
@@ -23,37 +37,73 @@ void SystemLogic::update() {
                                            predTEMP1, predTEMP2, predTEMP3, predVOLT, predCURR, predPWM);
     bool uartOk = useForecast;
 
-    // Чтение ШИМ от полётного контроллера
-    pinMode(inputPWM_PIN, INPUT); // Вход для ШИМ от полётного контроллера
-    float inputPWM = readInputPWM(); // В μs
-    // Комбинируем inputPWM и predPWM (например, берём минимум для безопасности)
-    float effectivePWM = useForecast ? min(inputPWM, predPWM) : inputPWM;
+    // === ВХОДНОЙ ШИМ ОТ ПОЛЁТНИКА (через MotorControl) ===
+    unsigned long inputPulseUs = motor.getInputPulseWidth();
+    float inputPWM_us = (inputPulseUs >= 1000 && inputPulseUs <= 2000) ? inputPulseUs : 1500.0f;
 
-    int errorCode = -1; 
+    // === ЛОГИКА УПРАВЛЕНИЯ ===
+    int targetPWM = 0;
+    int errorCode = ERROR_NONE;
+    bool systemOk = true;
+
+    // if (useForecast && predPWM >= 1000 && predPWM <= 2000) {
+    //     // ИСП работает — используем безопасный минимум
+    //     float safePWM = min(inputPWM_us, predPWM);
+    //     targetPWM = map(constrain((int)safePWM, 1000, 2000), 1000, 2000, 0, 255);
+    //     motor.setMode(MotorControl::MODE_NORMAL);
+    // } else {
+    //     motor.setMode(MotorControl::MODE_NORMAL);
+    //     targetPWM = map(constrain((int)inputPWM_us,1000,2000),1000,2000,0,255);
+        
+        
+    //     // // ИСП не отвечает → аварийный режим BYPASS
+    //     // Serial.println(F("ИСП НЕ ОТВЕЧАЕТ → ПЕРЕКЛЮЧЕНИЕ В BYPASS MODE"));
+    //     // motor.setMode(MotorControl::MODE_BYPASS);
+    //     // targetPWM = map(constrain((int)inputPWM_us, 1000, 2000), 1000, 2000, 0, 255);
+    //     // systemOk = false;
+    // }
+
+
     errorCode = getErrorCode(temp1, temp2, temp3, vibration, voltage, current, predVOLT, predCURR, predPWM, predTEMP2);
-    int targetPWM = useForecast ? adjustPWM(effectivePWM, predVOLT, predCURR, voltage, current, predTEMP2, temp2) 
-    : adjustPWM(motor.getCurrentPWM() * 1000.0f, voltage, current, voltage, current, predTEMP2, temp2);
-    bool motorOk = motor.setPWM(targetPWM);
+    if (errorCode == ERROR_CRITICAL) {
+        targetPWM = 1300;
+        motor.setPWM(1300);
+    } else {
+        motor.setPWM(targetPWM);
+    }
 
     // Обновление светодиода с приоритетом ошибок
-    updateLED(errorCode, uartOk && motorOk);
+    updateLED(errorCode, systemOk);
 
     // if (errorCode != ERROR_NONE || !motorOk) {
     //     motor.setPWM(EMERGENCY_PWM);
     //     analogWrite(PA8, EMERGENCY_PWM);
     // }
 
-    float pwm_value = motor.getCurrentPWM() * 1000.0f;
+    
     uart.sendData(static_cast<int16_t>(ax * 100), static_cast<int16_t>(ay * 100), static_cast<int16_t>(az * 100),
                   static_cast<int16_t>(gx * 100), static_cast<int16_t>(gy * 100), static_cast<int16_t>(gz * 100),
-                  temp1, temp2, temp3, voltage, current, pwm_value, vibration, errorCode);
+                  temp1, temp2, temp3, voltage, current, motor.getCurrentPWM(), vibration, errorCode);
+
+    static uint32_t lastDebugPrint = 0;
+    const uint32_t debugInterval = 500; // каждые 500 мс
+
+    // // === ОТЛАДКА В SERIAL ===
+    // if (millis() - lastDebugPrint >= debugInterval) {
+    //     Serial.print(F("IN: "));
+    //     Serial.print(inputPWM_us);
+    //     Serial.print(F("us → OUT: "));
+    //     Serial.print(motor.getCurrentPWM());
+    //     Serial.print(F(" | Mode: "));
+    //     Serial.print(motor.getCurrentPWM() == map(constrain((int)inputPWM_us,1000,2000),1000,2000,0,255) ? F("BYPASS") : F("NORMAL"));
+    //     Serial.print(F(" | Forecast: "));
+    //     Serial.print(useForecast ? F("YES") : F("NO"));
+    //     Serial.print(F(" | ERR: "));
+    //     Serial.println(errorCode);
+    //     lastDebugPrint = millis();
+    // }
 }
 
-float SystemLogic::readInputPWM() {
-    unsigned long pulse = pulseIn(inputPWM_PIN, HIGH, 25000); // Ожидаем импульс до 25 мс
-    if (pulse == 0) return motor.getCurrentPWM() * 1000.0f; // Если нет сигнала, вернуть текущий ШИМ
-    return constrain(pulse, 1000.0f, 2000.0f); // Ограничиваем 1000–2000 μs
-}
 
 int SystemLogic::getErrorCode(float temp1, float temp2, float temp3, float vibration, float voltage, float current, float predVolt, float predCurr, float predPWM, float predTEMP2) {
     if (temp2 > maxTempBattery) return ERROR_OVERHEAT_BATTERY;  // АКБ перегрев
@@ -70,27 +120,7 @@ int SystemLogic::getErrorCode(float temp1, float temp2, float temp3, float vibra
 }
 
 
-int SystemLogic::adjustPWM(float effectivePWM, float predVolt, float predCurr, float voltage, float current, float predTEMP2, float temp2) {
-    float targetPWM = static_cast<int>(effectivePWM / 1000.0f * 255.0f); // Конвертация μs в 0-255
 
-    // Защита батареи: снижение ШИМ при низком напряжении
-    if (predVolt < minVoltage * predVoltThreshold || voltage < minVoltage) {
-        targetPWM = max(targetPWM - pwmAdjustStep, 0.0f);
-    }
-    // Защита мотора: снижение ШИМ при высоком токе
-    else if (predCurr > maxCurrent * predCurrThreshold || current > maxCurrent) {
-        targetPWM = max(targetPWM - pwmAdjustStep, 0.0f);
-    }
-    // Повышение ШИМ, если прогноз безопасен
-    else if (predVolt > minVoltage && predCurr < maxCurrent * 0.7f && effectivePWM <= predPWMThreshold) {
-        targetPWM = min(targetPWM + pwmAdjustStep, 255.0f);
-    }
-    if (predTEMP2 > maxTempBattery * 0.9f || temp2 > maxTempBattery * 0.8f) {
-        targetPWM = max(targetPWM - pwmAdjustStep * 2, 0.0f);  // Усиленное понижение при перегреве АКБ
-    }
-
-    return constrain(static_cast<int>(targetPWM), 0, 255); // вот это надо тестить, потому что не факт что конвертация нужна 
-}
 
 float SystemLogic::calculateVibration(float ax, float ay, float az) {
     // Текущая норма гравитации (должна быть ~9.81)
@@ -108,62 +138,38 @@ float SystemLogic::calculateVibration(float ax, float ay, float az) {
 }
 
 void SystemLogic::updateLED(int errorCode, bool systemOk) {
-    unsigned long currentTime = millis();
-    
-    // Сбрасываем состояние при изменении errorCode или systemOk
-    if (errorCode != lastErrorCode || systemOk != lastSystemOk) {
-        ledBlinkCount = 0;
-        ledTargetBlinks = 0;
-        ledState = false;
-        digitalWrite(LED_PIN, HIGH); // Выкл (инвертированная логика)
-        lastLedUpdate = currentTime;
-        lastErrorCode = errorCode;
-        lastSystemOk = systemOk;
-    }
-
     if (errorCode == ERROR_CRITICAL) {
-        digitalWrite(LED_PIN, LOW); // Постоянно горит
-        ledBlinkCount = 0;
-        ledTargetBlinks = 0;
+        digitalWrite(LED_PIN, LOW);  // Постоянно горит
+        ledBlinkCount = ledTargetBlinks = 0;
         ledState = true;
     } else if (errorCode != ERROR_NONE) {
-        ledBlinkPattern(4, 200, 200, 2000); // 4 быстрых моргания
+        ledBlinkPattern(4, 150, 150, 2000);
     } else if (!systemOk) {
-        ledBlinkPattern(2, 200, 200, 2000); // 2 быстрых моргания
+        ledBlinkPattern(2, 200, 200, 2000);
     } else {
-        ledBlinkPattern(1, 200, 1800, 2000); // 1 моргание
+        ledBlinkPattern(1, 100, 1900, 2000);
     }
 }
 
 void SystemLogic::ledBlinkPattern(int blinks, int onTime, int offTime, int cycleTime) {
-    unsigned long currentTime = millis();
-
-    // Начало нового цикла
-    if (currentTime - lastLedUpdate >= cycleTime && ledBlinkCount == 0) {
-        ledBlinkCount = 0;
+    unsigned long now = millis();
+    if (now - lastLedUpdate >= cycleTime && ledBlinkCount == 0) {
         ledTargetBlinks = blinks;
+        ledBlinkCount = 0;
         ledState = true;
-        digitalWrite(LED_PIN, LOW); // Вкл
-        ledNextToggle = currentTime + onTime;
-        lastLedUpdate = currentTime;
+        digitalWrite(LED_PIN, LOW);
+        ledNextToggle = now + onTime;
+        lastLedUpdate = now;
         return;
     }
-
-    // Переключение в активном цикле
-    if (ledTargetBlinks > 0 && currentTime >= ledNextToggle) {
-        if (ledState) {
-            digitalWrite(LED_PIN, HIGH); // Выкл
-            ledState = false;
-            ledNextToggle = currentTime + offTime;
-            ledBlinkCount++;
-        } else if (ledBlinkCount < ledTargetBlinks) {
-            digitalWrite(LED_PIN, LOW); // Вкл
-            ledState = true;
-            ledNextToggle = currentTime + onTime;
-        } else {
+    if (ledTargetBlinks > 0 && now >= ledNextToggle) {
+        ledState = !ledState;
+        digitalWrite(LED_PIN, ledState ? LOW : HIGH);
+        ledNextToggle = now + (ledState ? onTime : offTime);
+        if (!ledState) ledBlinkCount++;
+        if (ledBlinkCount >= ledTargetBlinks) {
             ledTargetBlinks = 0;
-            ledBlinkCount = 0;
-            digitalWrite(LED_PIN, HIGH); // Выкл
+            digitalWrite(LED_PIN, HIGH);
         }
     }
 }

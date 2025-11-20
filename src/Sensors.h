@@ -32,10 +32,10 @@
 
 // Пороги разряда (V)
 #define MIN_VOLTAGE_5S  18.5f
-#define MIN_VOLTAGE_10S 37.0f
+#define MIN_VOLTAGE_10S 35.0f
 
 #define VIB_WINDOW_MS   100
-#define VIB_THRESHOLD   3    // порог вибраций
+#define VIB_THRESHOLD   3.7    // порог вибраций
 #define VIB_AXIS        2
 #define EEPROM_START    0
 #define BUFFER_SIZE     300

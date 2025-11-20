@@ -38,10 +38,12 @@ private:
     float calculateVibration(float ax, float ay, float az);  // Расчёт вибраций
     int getErrorCode(float temp1, float temp2, float temp3, float vibration, float voltage, float current, float predVolt, float predCurr, float predPWM, float predTEMP2);
     int adjustPWM(float effectivePWM, float predVolt, float predCurr, float voltage, float current, float predTEMP2, float temp2);
+    
 
 
 public:
     SystemLogic(Sensors& sens, MotorControl& mot, UARTComm& u, int batteryType, int INPUT_PWM_PIN);
+    void begin();
     void update();  // Обновление логики
     // Коды ошибок (зарезервированные значения для sendData)
     static const int ERROR_NONE = -1;                   // Нормальная работа

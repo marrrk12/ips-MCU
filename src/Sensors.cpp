@@ -12,7 +12,7 @@ Sensors::Sensors(int oneWirePin, int voltPin, int currPin)
 bool Sensors::init() {
     Serial.println("Sensors::init() START");
 
-        // Включаем подтяжки (на всякий случай)
+    // Включаем подтяжки (на всякий случай)
     pinMode(PB6, INPUT_PULLUP);
     pinMode(PB7, INPUT_PULLUP);
     
@@ -28,10 +28,6 @@ bool Sensors::init() {
     Serial.print("mpu.testConnection(): ");
     Serial.println(connected ? "OK" : "FAILED");
 
-    if (!connected) {
-        Serial.println("MPU6050 NOT RESPONDING!");
-        return false;
-    }
     
     Serial.println("MPU6050 CONNECTED");
 
@@ -49,10 +45,15 @@ bool Sensors::init() {
             Serial.print("DS18B20 #");
             Serial.print(i);
             Serial.println(" NOT FOUND");
-            return false;
+            connected = false;
         }
     }
-
+    
+    if (!connected) {
+        Serial.println("MPU6050 OR DS18B20 NOT RESPONDING!");
+        return false;
+    }
+    
     Serial.println("Sensors::init() SUCCESS");
     return true;
 }
