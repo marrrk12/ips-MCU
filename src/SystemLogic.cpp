@@ -1,8 +1,8 @@
 // src/SystemLogic.cpp
 #include "SystemLogic.h"
 
-SystemLogic::SystemLogic(Sensors& sens, MotorControl& mot, UARTComm& u, int batteryType, int inputPWM_Pin) :
-    sensors(sens), motor(mot), uart(u), maxCurrent(mot.getMaxCurrent()), inputPWM_PIN(inputPWM_Pin) {
+SystemLogic::SystemLogic(Sensors& sens, MotorControl& mot, UARTComm& u, int batteryType) :
+    sensors(sens), motor(mot), uart(u), maxCurrent(mot.getMaxCurrent()) {
 
     minVoltage = (batteryType == BATTERY_5S) ? MIN_VOLTAGE_5S : MIN_VOLTAGE_10S;
     // Инициализация LED
@@ -19,12 +19,12 @@ void SystemLogic::begin() {
 }
 
 void SystemLogic::update() {
-    
-
     float ax, ay, az, gx, gy, gz;
     float temp1, temp2, temp3;
+    
     float voltage = sensors.readVoltage();
     float current = sensors.readCurrent();
+    
     sensors.readMPU(ax, ay, az, gx, gy, gz);
     sensors.readDS(temp1, temp2, temp3);
 
@@ -32,19 +32,30 @@ void SystemLogic::update() {
 
     float predAX = 0, predAY = 0, predAZ = 0, predGX = 0, predGY = 0, predGZ = 0;
     float predTEMP1 = temp1, predTEMP2 = temp2, predTEMP3 = temp3;
-    float predVOLT = voltage, predCURR = current, predPWM = motor.getCurrentPWM() * 1000.0f;
+    float predVOLT = voltage, predCURR = current, predPWM = 1500;
+    
     bool useForecast = uart.receiveForecast(predAX, predAY, predAZ, predGX, predGY, predGZ,
                                            predTEMP1, predTEMP2, predTEMP3, predVOLT, predCURR, predPWM);
-    bool uartOk = useForecast;
+    // bool uartOk = useForecast;
 
-    // === ВХОДНОЙ ШИМ ОТ ПОЛЁТНИКА (через MotorControl) ===
-    unsigned long inputPulseUs = motor.getInputPulseWidth();
-    float inputPWM_us = (inputPulseUs >= 1000 && inputPulseUs <= 2000) ? inputPulseUs : 1500.0f;
+    // === 3. Читаем входной ШИМ от полётника ===
+    unsigned long input_us = motor.getInputPulseWidth();
+    if (input_us < 900 || input_us > 2100) input_us = 1000;  // защита
 
-    // === ЛОГИКА УПРАВЛЕНИЯ ===
-    int targetPWM = 0;
+    // === 4. БАЗОВОЕ ЗНАЧЕНИЕ — то, что хочет полётник ===
+    desired_pwm_us = (uint16_t)input_us;
+
+    // === 5. ЗАЩИТЫ И КОРРЕКЦИЯ (вот где магия) ===
+    bool emergency = false;
     int errorCode = ERROR_NONE;
-    bool systemOk = true;
+    // // === ВХОДНОЙ ШИМ ОТ ПОЛЁТНИКА (через MotorControl) ===
+    // unsigned long inputPulseUs = motor.getInputPulseWidth();
+    // float inputPWM_us = (inputPulseUs >= 1000 && inputPulseUs <= 2000) ? inputPulseUs : 1500.0f;
+
+    // // === ЛОГИКА УПРАВЛЕНИЯ ===
+    // int targetPWM = 0;
+    // int errorCode = ERROR_NONE;
+    // bool systemOk = true;
 
     // if (useForecast && predPWM >= 1000 && predPWM <= 2000) {
     //     // ИСП работает — используем безопасный минимум
@@ -65,28 +76,30 @@ void SystemLogic::update() {
 
 
     errorCode = getErrorCode(temp1, temp2, temp3, vibration, voltage, current, predVOLT, predCURR, predPWM, predTEMP2);
-    if (errorCode == ERROR_CRITICAL) {
-        targetPWM = 1300;
-        motor.setPWM(1300);
-    } else {
-        motor.setPWM(targetPWM);
-    }
+    // if (errorCode == ERROR_CRITICAL) {
+    //     targetPWM = 1300;
+    //     motor.setPWM(1300);
+    // } else {
+    //     motor.setPWM(targetPWM);
+    // }
 
     // Обновление светодиода с приоритетом ошибок
-    updateLED(errorCode, systemOk);
+    updateLED(errorCode, useForecast);
 
     // if (errorCode != ERROR_NONE || !motorOk) {
     //     motor.setPWM(EMERGENCY_PWM);
     //     analogWrite(PA8, EMERGENCY_PWM);
     // }
 
+    // === 6. Ограничение диапазона ===
+    desired_pwm_us = constrain(desired_pwm_us, 1000, 2000);
     
     uart.sendData(static_cast<int16_t>(ax * 100), static_cast<int16_t>(ay * 100), static_cast<int16_t>(az * 100),
                   static_cast<int16_t>(gx * 100), static_cast<int16_t>(gy * 100), static_cast<int16_t>(gz * 100),
-                  temp1, temp2, temp3, voltage, current, motor.getCurrentPWM(), vibration, errorCode);
+                  temp1, temp2, temp3, voltage, current, desired_pwm_us, vibration, errorCode);
 
-    static uint32_t lastDebugPrint = 0;
-    const uint32_t debugInterval = 500; // каждые 500 мс
+    // static uint32_t lastDebugPrint = 0;
+    // const uint32_t debugInterval = 500; // каждые 500 мс
 
     // // === ОТЛАДКА В SERIAL ===
     // if (millis() - lastDebugPrint >= debugInterval) {
@@ -102,7 +115,14 @@ void SystemLogic::update() {
     //     Serial.println(errorCode);
     //     lastDebugPrint = millis();
     // }
+
 }
+
+
+uint16_t getDesiredPWM(){
+    uint16_t desired_pwm_us = 1100;
+        return desired_pwm_us;
+    }
 
 
 int SystemLogic::getErrorCode(float temp1, float temp2, float temp3, float vibration, float voltage, float current, float predVolt, float predCurr, float predPWM, float predTEMP2) {
@@ -112,10 +132,10 @@ int SystemLogic::getErrorCode(float temp1, float temp2, float temp3, float vibra
     if (sensors.isVibrationDetected()) return ERROR_HIGH_VIBRATION;
     if (voltage < minVoltage) return ERROR_LOW_VOLTAGE;
     if (current > maxCurrent) return ERROR_OVERCURRENT;
-    if (predVolt < minVoltage * predVoltThreshold) return ERROR_LOW_VOLTAGE;
-    if (predCurr > maxCurrent * predCurrThreshold) return ERROR_OVERCURRENT;
-    if (predPWM > predPWMThreshold) return ERROR_CRITICAL;
-    if (predTEMP2 > maxTempBattery * 0.9f) return ERROR_OVERHEAT_BATTERY;  // Упреждающий перегрев АКБ
+    // if (predVolt < minVoltage * predVoltThreshold) return ERROR_LOW_VOLTAGE;
+    // if (predCurr > maxCurrent * predCurrThreshold) return ERROR_OVERCURRENT;
+    // if (predPWM > predPWMThreshold) return ERROR_CRITICAL;
+    // if (predTEMP2 > maxTempBattery * 0.9f) return ERROR_OVERHEAT_BATTERY;  // Упреждающий перегрев АКБ
     return ERROR_NONE;
 }
 

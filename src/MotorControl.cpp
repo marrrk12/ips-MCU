@@ -9,11 +9,18 @@ MotorControl::MotorControl(uint8_t outPin, uint8_t inPin, float maxCurrent)
 }
 
 void MotorControl::begin() {
-    pinMode(pwmOutPin, OUTPUT);
-    analogWrite(pwmOutPin, 0);
+    // pinMode(pwmOutPin, OUTPUT);
+    // analogWrite(pwmOutPin, 0);
 
     pinMode(pwmInPin, INPUT);
     attachInterrupt(digitalPinToInterrupt(pwmInPin), handleRiseWrapper, RISING);
+}
+
+unsigned long MotorControl::getInputPulseWidth() const {
+    noInterrupts();
+    unsigned long pw = pulseWidth;
+    interrupts();
+    return pw;
 }
 
 void MotorControl::setMode(Mode mode) {
@@ -112,12 +119,7 @@ int MotorControl::getCurrentPWM() const {
     return currentPWM;
 }
 
-unsigned long MotorControl::getInputPulseWidth() const {
-    noInterrupts();
-    unsigned long pw = pulseWidth;
-    interrupts();
-    return pw;
-}
+
 
 float MotorControl::getMaxCurrent() const {
     return maxCurrent;

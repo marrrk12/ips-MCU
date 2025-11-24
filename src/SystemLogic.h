@@ -15,12 +15,12 @@ private:
     UARTComm& uart;
     float maxTemp = 80.0f;       // Максимальная температура (°C)
     float maxVibration = 3.0f;  // Максимальная вибрация (m/s²)
-    float minVoltage;            // Динамический порог напряжения
-    float maxCurrent;            // Максимальный ток из MotorControl
+    float minVoltage = 35.0f;            // Динамический порог напряжения
+    float maxCurrent = 60.0f;            // Максимальный ток из MotorControl
     float predVoltThreshold = 0.9f;  // Порог прогноза напряжения (90% от minVoltage)
     float predCurrThreshold = 0.9f;  // Порог прогноза тока (90% от maxCurrent)
     float predPWMThreshold = 2000.0f; // Максимальный прогноз ШИМ (μs)
-    float pwmAdjustStep = 10.0f;     // Шаг корректировки ШИМ (μs)
+    // float pwmAdjustStep = 10.0f;     // Шаг корректировки ШИМ (μs)
     const int LED_PIN = PC13;
     unsigned long lastLedUpdate = 0;
     int ledBlinkCount = 0; // Счётчик морганий
@@ -31,7 +31,7 @@ private:
     unsigned long ledNextToggle = 0; // Время следующего переключения
     float maxTempBattery = 50.0f;  // Максимальная температура АКБ (°C)
     // const int INPUT_PWM_PIN = PB8; // Пин для входного ШИМ от полётного контроллера
-    int inputPWM_PIN;  // Пин для входного ШИМ от полётного контроллера (теперь через конструктор)
+    uint16_t desired_pwm_us = 1100;
     float readInputPWM(); // Чтение ШИМ (μs)
     void updateLED(int errorCode, bool uartOk);
     void ledBlinkPattern(int blinks, int onTime, int offTime, int cycleTime);
@@ -39,10 +39,12 @@ private:
     int getErrorCode(float temp1, float temp2, float temp3, float vibration, float voltage, float current, float predVolt, float predCurr, float predPWM, float predTEMP2);
     int adjustPWM(float effectivePWM, float predVolt, float predCurr, float voltage, float current, float predTEMP2, float temp2);
     
+    
 
 
 public:
-    SystemLogic(Sensors& sens, MotorControl& mot, UARTComm& u, int batteryType, int INPUT_PWM_PIN);
+    uint16_t getDesiredPWM() const { return desired_pwm_us; }
+    SystemLogic(Sensors& sens, MotorControl& mot, UARTComm& u, int batteryType);
     void begin();
     void update();  // Обновление логики
     // Коды ошибок (зарезервированные значения для sendData)
