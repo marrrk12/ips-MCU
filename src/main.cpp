@@ -14,7 +14,7 @@
 Sensors sensors(PB0, PA1, PA7);  // Пин для 1-Wire, напряжение, ток
 // HardwareSerial Serial1(PA10, PA9); // Uart to RPI
 UARTComm uart(Serial);  // Используем существующий Serial1
-MotorControl motor(PA8, PB8, 80.0f); // PWM
+MotorControl motor(PA11, PA8, 80.0f); // PWM
 SystemLogic systemLogic(sensors, motor, uart, BATTERY_TYPE, PB8);  // Логика системы
 // Timer mainLoopTimer(500, true);      // Основной цикл - 500мс
 // Timer uartSendTimer(100, true);      // Отправка данных - 100мс

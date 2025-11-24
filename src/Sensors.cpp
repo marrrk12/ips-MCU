@@ -212,44 +212,43 @@ float Sensors::readVoltage() {
     return voltageIn;
 }
 
-float Sensors::readCurrent() { 
-    const int samples = 50;
+float Sensors::readCurrent() {
+    const int NUM_SAMPLES = 10;
+    static int samples[NUM_SAMPLES] = {0};
+    static int sampleIndex = 0;
+
+    // === ТВОЯ ТОЧНАЯ КАЛИБРОВКА ===
+    const int ZERO_ADC = 515;                    // ← При 0 А
+    const float SENSITIVITY_ADC_PER_A = 4.0f;    // ← 4 единицы ADC на 1 А
+    // =====================================
+
+    // Чтение с фильтром
+    samples[sampleIndex] = analogRead(currentPin);
+    sampleIndex = (sampleIndex + 1) % NUM_SAMPLES;
+
     long sum = 0;
-
-    for (int i = 0; i < samples; i++) {
-        sum += analogRead(currentPin);
-        delay(1);
+    for (int i = 0; i < NUM_SAMPLES; i++) {
+        sum += samples[i];
     }
-    int analogValue = sum / samples;  // 0-4095
-    float voltage = (analogValue * V_REF_CALIB) / 4095.0f * ADC_CALIB;  // V_out от ADC
-    
-    // === АВТОКАЛИБРОВКА НУЛЯ (один раз при старте) ===
-    static bool zeroCalibrated = false;
-    static float zeroOffsetVoltage = 1.65f;  // начальное значение
+    int avgADC = sum / NUM_SAMPLES;
 
-    if (!zeroCalibrated) {
-        // Ждём 2 секунды после старта, чтобы ток был 0
-        static uint32_t startTime = millis();
-        if (millis() - startTime > 2000) {
-            zeroOffsetVoltage = voltage;
-            Serial1.print("Ток: нулевое напряжение = ");
-            Serial1.print(zeroOffsetVoltage, 4);
-            Serial1.println("V");
-            zeroCalibrated = true;
-        }
-    }
-    // === ОСНОВНАЯ ФОРМУЛА ===
-    float rawCurrent = -(voltage - zeroOffsetVoltage) / ACS_SENS;
+    // === РАСЧЁТ ТОКА ===
+    int deltaADC = avgADC - ZERO_ADC;
+    float current = deltaADC / SENSITIVITY_ADC_PER_A;
 
-    // === ЛИНЕЙНАЯ КАЛИБРОВКА (по твоим данным) ===
-    const float CALIBRATION_SCALE = 2.222f;   // 1 / 0.45
-    const float CALIBRATION_OFFSET = 0.222f;  // 0.1 / 0.45
+    // Защита от шума
+    if (current < 0.05f) current = 0.0f;
 
-    float calibratedCurrent = (rawCurrent + CALIBRATION_OFFSET) * CALIBRATION_SCALE;
+    // // Отладка (можно убрать потом)
+    // static uint32_t lastPrint = 0;
+    // if (millis() - lastPrint > 1000) {
+    //     Serial.print(F("CURR: ADC="));
+    //     Serial.print(avgADC);
+    //     Serial.print(F(" → "));
+    //     Serial.print(current, 2);
+    //     Serial.println(F("A"));
+    //     lastPrint = millis();
+    // }
 
-    // Ограничение
-    if (calibratedCurrent < 0) calibratedCurrent = 0;
-
-    return calibratedCurrent;
+    return current;
 }
-
