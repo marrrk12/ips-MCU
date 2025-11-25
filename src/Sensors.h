@@ -19,24 +19,15 @@
 #define V_REF_CALIB 3.26f     // Напряжение на 3.3V пине
 #define ADC_CALIB  4.182f  // Коэффициент ошибки АЦП
 
-// Для ACS758 (питание 5В)
-#define ACS_QUIESCENT       0.6f    // Quiescent Vout при 5В
-#define ACS_SENS            0.04f        // Чувствительность 40мВ/А
-#define ACS_DIVIDER_SCALE   1.0f  // Масштаб делителя Vout (например, 2 для 10k/10k делителя, чтобы 5В→2.5В)
+// Для ACS758 (питание 3.3В)
+#define ZERO_ADC 515          // Фикс нуль тока ACS758
+#define SENSITIVITY_ADC_PER_A 4.0f  // 4 ADC/А
 
-#define BATTERY_5S   0  // Испытания: 21В номинал, min=18.5В
 #define BATTERY_10S  1  // Полёты: 42В номинал, min=37В
-
-// Выберите конфигурацию BATTERY_5S или BATTERY_10S
-#define BATTERY_TYPE BATTERY_10S
-
-// Пороги разряда (V)
-#define MIN_VOLTAGE_5S  18.5f
 #define MIN_VOLTAGE_10S 35.0f
 
 #define VIB_WINDOW_MS   100
 #define VIB_THRESHOLD   3.7    // порог вибраций
-#define VIB_AXIS        2
 #define EEPROM_START    0
 #define BUFFER_SIZE     300
 
@@ -47,8 +38,8 @@ private:
     // Adafruit_MPU6050 mpu;  // Обновлённый объект MPU-6050
     MPU6050 mpu;
     OneWire oneWire;  // Шина для DS18B20
-    DallasTemperature dsSensors;  // DS18B20
-    DeviceAddress dsAddresses[3];  // Адреса трёх датчиков
+    // DallasTemperature dsSensors;  // DS18B20
+    // DeviceAddress dsAddresses[3];  // Адреса трёх датчиков
     int voltagePin;  // Пин для напряжения (делитель)
     int currentPin;  // Пин для тока (ACS758)
 
@@ -58,6 +49,7 @@ private:
     uint32_t lastVibTime = 0;
     float vibrationLevel = 0;
     bool vibrationDetected = false;
+    float filteredVib = 0.0f;  // EMA
 
     int16_t offsets[6];
 
@@ -66,6 +58,8 @@ private:
     void meansensors(int* max, int* may, int* maz, int* mgx, int* mgy, int* mgz);
 
 public:
+    DallasTemperature dsSensors;  // DS18B20
+    DeviceAddress dsAddresses[3];  // Адреса трёх датчиков
     Sensors(int oneWirePin, int voltPin, int currPin);  // Конструктор
     bool init();  // Инициализация с проверкой
     void readMPU(float &ax, float &ay, float &az, float &gx, float &gy, float &gz);  // Чтение MPU

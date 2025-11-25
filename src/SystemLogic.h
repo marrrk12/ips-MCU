@@ -4,49 +4,67 @@
 
 #include "Sensors.h"
 #include "UARTComm.h"
-#include "MotorControl.h"
+// #include "MotorControl.h"
 
-#define EMERGENCY_PWM 1500  // Предполагаемый ШИМ для экстренных ситуаций
+#define EMERGENCY_PWM 1100  // Предполагаемый ШИМ для экстренных ситуаций
+#define RAMP_STEP 50
+
+#define LED_PIN PC13
+
+extern volatile int lastDelta;
 
 class SystemLogic {
 private:
     Sensors& sensors;
-    MotorControl& motor;
+    // MotorControl& motor;
     UARTComm& uart;
-    float maxTemp = 80.0f;       // Максимальная температура (°C)
-    float maxVibration = 3.0f;  // Максимальная вибрация (m/s²)
+    float maxTempMotor = 80.0f;       // Максимальная температура (°C)
+    float maxTempBattery = 50.0f;
+    float maxVibration = 3.7f;  // Максимальная вибрация (m/s²)
     float minVoltage = 35.0f;            // Динамический порог напряжения
-    float maxCurrent = 60.0f;            // Максимальный ток из MotorControl
-    float predVoltThreshold = 0.9f;  // Порог прогноза напряжения (90% от minVoltage)
-    float predCurrThreshold = 0.9f;  // Порог прогноза тока (90% от maxCurrent)
-    float predPWMThreshold = 2000.0f; // Максимальный прогноз ШИМ (μs)
-    // float pwmAdjustStep = 10.0f;     // Шаг корректировки ШИМ (μs)
-    const int LED_PIN = PC13;
-    unsigned long lastLedUpdate = 0;
-    int ledBlinkCount = 0; // Счётчик морганий
-    int ledTargetBlinks = 0; // Сколько раз моргнуть
-    bool ledState = false; // Текущее состояние (вкл/выкл)
-    int lastErrorCode = ERROR_NONE; // Добавляем
-    bool lastSystemOk = true; // Добавляем
-    unsigned long ledNextToggle = 0; // Время следующего переключения
-    float maxTempBattery = 50.0f;  // Максимальная температура АКБ (°C)
-    // const int INPUT_PWM_PIN = PB8; // Пин для входного ШИМ от полётного контроллера
-    uint16_t desired_pwm_us = 1100;
-    float readInputPWM(); // Чтение ШИМ (μs)
-    void updateLED(int errorCode, bool uartOk);
-    void ledBlinkPattern(int blinks, int onTime, int offTime, int cycleTime);
-    float calculateVibration(float ax, float ay, float az);  // Расчёт вибраций
-    int getErrorCode(float temp1, float temp2, float temp3, float vibration, float voltage, float current, float predVolt, float predCurr, float predPWM, float predTEMP2);
-    int adjustPWM(float effectivePWM, float predVolt, float predCurr, float voltage, float current, float predTEMP2, float temp2);
-    
-    
+    float maxCurrent = 70.0f;            // Максимальный ток из MotorControl
+    float predThreshold = 0.9f;
+    int errorCode = ERROR_NONE;
 
+    // Кэшированные значения (обновляются в update())
+    float t1 = 0, t2 = 0, t3 = 0;
+    float voltage = 0, current = 0, vibration = 0;
+    float predT1 = 0, predT2 = 0, predT3 = 0, predV = 0, predI = 0, predPWM = 0, predVib = 0;
+
+    uint32_t lastForecastTime = 0;
+    const uint32_t forecastTimeout = 2000;
+    // int currentCorrectedPWM = 1000;  // с ramp
+
+    // Асинх DS
+    uint32_t lastTempRequest = 0;
+    bool tempsRequested = false;
+    const uint32_t tempConversionTime = 94;  // 9bit
+
+    int targetDelta = 0;  // Целевая дельта от calculate
+
+    unsigned long lastLedUpdate = 0;
+    int ledBlinkCount = 0;
+    int ledTargetBlinks = 0;
+    bool ledState = false;
+    unsigned long ledNextToggle = 0;
+    
+    int calculateDelta(int basePWM);
+    void updateLED(int errorCode);
+    void ledBlinkPattern(int blinks, int onTime, int offTime, int cycleTime);
+    int getErrorCode(float temp1, float temp2, float temp3, 
+        float vibration, float voltage, float current, float pwm,
+        float predTEMP1, float predTEMP2, float predTEMP3, 
+        float predVibration, float predVolt, float predCurr, float predPWM);
 
 public:
-    uint16_t getDesiredPWM() const { return desired_pwm_us; }
-    SystemLogic(Sensors& sens, MotorControl& mot, UARTComm& u, int batteryType);
+    
+    SystemLogic(Sensors& s, UARTComm& u) : sensors(s), uart(u) {}
     void begin();
-    void update();  // Обновление логики
+    void update(unsigned long basePWM);     // ← теперь принимает basePWM
+    int getDesiredPWM(int basePWM) { return basePWM + lastDelta; }  // Для main, но мы используем lastDelta глобально    void rampDelta();
+    void rampDelta();
+    
+
     // Коды ошибок (зарезервированные значения для sendData)
     static const int ERROR_NONE = -1;                   // Нормальная работа
     static const int ERROR_OVERHEAT_MOTOR = -2;         // Перегрев >50°C

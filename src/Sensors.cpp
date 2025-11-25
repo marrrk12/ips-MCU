@@ -1,17 +1,18 @@
 // src/Sensors.cpp
 #include "Sensors.h"
 #include <EEPROM.h>  // Для STM32 — виртуальная EEPROM
-#include "Timer.h"
+// #include "Timer.h"
 
 Sensors::Sensors(int oneWirePin, int voltPin, int currPin)
     : oneWire(oneWirePin), dsSensors(&oneWire), voltagePin(voltPin), currentPin(currPin), mpu(0x68){
-    pinMode(voltagePin, INPUT);
-    pinMode(currentPin, INPUT);
+    
 }
 
 bool Sensors::init() {
     Serial.println("Sensors::init() START");
 
+    pinMode(voltagePin, INPUT);
+    pinMode(currentPin, INPUT);
     // Включаем подтяжки (на всякий случай)
     pinMode(PB6, INPUT_PULLUP);
     pinMode(PB7, INPUT_PULLUP);
@@ -21,15 +22,9 @@ bool Sensors::init() {
 
     Serial.println("Wire.begin() OK");
 
+    bool connected = true;
     mpu.initialize();
-    Serial.println("mpu.initialize() OK");
-
-    bool connected = mpu.testConnection();
-    Serial.print("mpu.testConnection(): ");
-    Serial.println(connected ? "OK" : "FAILED");
-
-    
-    Serial.println("MPU6050 CONNECTED");
+    if (!mpu.testConnection()) connected = false;
 
     // Настройка диапазонов
     mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_8);
@@ -51,11 +46,10 @@ bool Sensors::init() {
     
     if (!connected) {
         Serial.println("MPU6050 OR DS18B20 NOT RESPONDING!");
-        return false;
     }
     
     Serial.println("Sensors::init() SUCCESS");
-    return true;
+    return connected;
 }
 
 void Sensors::readMPU(float &ax, float &ay, float &az, float &gx, float &gy, float &gz) {
@@ -71,16 +65,17 @@ void Sensors::readMPU(float &ax, float &ay, float &az, float &gx, float &gy, flo
 
     // === ВИБРАЦИЯ ===
     float acc_mag = sqrt(ax*ax + ay*ay + az*az);
-    float g_force = acc_mag;
-    float vib_g = fabs(g_force - 1.0f);
+    float vib_g = fabs(acc_mag - 1.0f);
 
     sumSq += (long)(vib_g * 1000);
     samples++;
 
     uint32_t now = millis();
     if (now - lastVibTime >= VIB_WINDOW_MS) {
-        float rms_g = sqrt((float)sumSq / samples) / 1000.0f;
-        vibrationLevel = constrain(rms_g * 100, 0, 100);
+        float raw_vib = sqrt((float)sumSq / samples) / 10.0f;
+        const float alpha = 0.7f;
+        filteredVib = alpha * filteredVib + (1.0f - alpha) * raw_vib;
+        vibrationLevel = constrain(filteredVib, 0, 100);
         vibrationDetected = (vibrationLevel > VIB_THRESHOLD);
 
         sumSq = 0; samples = 0; lastVibTime = now;
@@ -157,7 +152,8 @@ void Sensors::meansensors(int* max, int* may, int* maz, int* mgx, int* mgy, int*
   int16_t tax, tay, taz, tgx, tgy, tgz;
 
   int count = BUFFER_SIZE + 100;
-  Timer sampleTimer(2, true);  
+  const unsigned long sampleInterval = 2;  // 2 миллисекунды между выборками
+  
 
   for (int i = 0; i < count; i++) {
     mpu.getMotion6(&tax, &tay, &taz, &tgx, &tgy, &tgz);
@@ -165,11 +161,17 @@ void Sensors::meansensors(int* max, int* may, int* maz, int* mgx, int* mgy, int*
       sum_ax += tax; sum_ay += tay; sum_az += taz;
       sum_gx += tgx; sum_gy += tgy; sum_gz += tgz;
     }
-    while (!sampleTimer.update()) {
-            // Можно выполнять другие задачи здесь
-            // HAL_IWDG_Refresh(&hiwdg); // Обновляем Watchdog
-        }
+    // Стандартная логика таймера с микросекундами (более точная)
+    if (i < count - 1) {  // Не ждем после последней выборки
+      unsigned long startTime = micros();
+      while (micros() - startTime < sampleInterval) {
+        // Можно выполнять другие задачи здесь
+        // HAL_IWDG_Refresh(&hiwdg); // Обновляем Watchdog
+        // yield(); // Для Arduino - отдает управление другим задачам
+      }
+    }
   }
+
 
   *max = sum_ax / BUFFER_SIZE;
   *may = sum_ay / BUFFER_SIZE;
@@ -195,7 +197,6 @@ float Sensors::readVoltage() {
 
     for (int i = 0; i < samples; i++) {
         sum += analogRead(voltagePin);
-        delay(1);
     }
 
     int analogValue = sum / samples;
@@ -217,10 +218,10 @@ float Sensors::readCurrent() {
     static int samples[NUM_SAMPLES] = {0};
     static int sampleIndex = 0;
 
-    // === ТВОЯ ТОЧНАЯ КАЛИБРОВКА ===
-    const int ZERO_ADC = 515;                    // ← При 0 А
-    const float SENSITIVITY_ADC_PER_A = 4.0f;    // ← 4 единицы ADC на 1 А
-    // =====================================
+    // // === ТВОЯ ТОЧНАЯ КАЛИБРОВКА ===
+    // const int ZERO_ADC = 515;                    // ← При 0 А
+    // const float SENSITIVITY_ADC_PER_A = 4.0f;    // ← 4 единицы ADC на 1 А
+    // // =====================================
 
     // Чтение с фильтром
     samples[sampleIndex] = analogRead(currentPin);

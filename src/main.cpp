@@ -1,125 +1,145 @@
 #include "Sensors.h"
 #include "UARTComm.h"
-#include "MotorControl.h"
 #include "SystemLogic.h"
-#include "Timer.h"
+#include <Servo.h>
+// #include "MotorControl.h"
 
-// Создаем таймеры для разных задач
-#define PWM_OUT_PIN PA11    // ← Выход на ESC
-#define PWM_IN_PIN  PA8     // ← Вход от полётника
-#define LED_PIN PC13
+#define PWM_IN PA8
+#define PWM_OUT PA11
 
-// #include "stm32f1xx_hal.h"         
-// IWDG_HandleTypeDef hiwdg;
+Sensors sensors(PB0, PA1, PA7); // Пин для 1-Wire, напряжение, ток // HardwareSerial Serial1(PA10, PA9); // Uart to RPI
+UARTComm uart(Serial); // Используем существующий Serial1
+SystemLogic systemLogic(sensors, uart); // Логика системы
+Servo esc;
 
-Sensors sensors(PB0, PA1, PA7);  // Пин для 1-Wire, напряжение, ток
-// HardwareSerial Serial1(PA10, PA9); // Uart to RPI
-UARTComm uart(Serial);  // Используем существующий Serial1
-MotorControl motor(PA11, PA8, 80.0f); // PWM
-SystemLogic systemLogic(sensors, motor, uart, BATTERY_TYPE, PB8);  // Логика системы
-// Timer mainLoopTimer(500, true);      // Основной цикл - 500мс
-// Timer uartSendTimer(100, true);      // Отправка данных - 100мс
+// Глобальные для входного PWM (прерывания CHANGE)
+volatile unsigned long pulseInWidth = 1100;  // Входной ШИМ
+volatile bool newPulse = false;
+volatile unsigned long riseTime = 0;
 
-// Глобальные переменные — только для ШИМ
-volatile uint16_t output_pwm_us = 1100;     // ← Это и есть выход на ESC его можно корректировать, 
-                                            //   на испытания поставил низкие 1100, а так можно и 1500 воткнуть 
-volatile bool pwm_update_needed = false;
+void pulseHandler();
 
-// === Прерывание таймера — строго каждые 20 мс (50 Гц) ===
-void pwmTimerISR() {
-    if (pwm_update_needed) {
-        analogWrite(PWM_OUT_PIN, output_pwm_us);   // ← Только здесь!
-        pwm_update_needed = false;
-    }
-}
+// Глобальный режим (по умолчанию BYPASS - чистый пасsthrough)
+enum Mode
+{
+    MODE_BYPASS,
+    MODE_NORMAL
+};
+Mode currentMode = MODE_NORMAL;
 
+// Delta от логики (volatile для безопасного доступа)
+// volatile int lastDelta = 0; // Текущая дельта от логики
 
-void setup() {
+void setup()
+{
     Serial.println("Start");
-    pinMode(LED_PIN, OUTPUT); // Инициализация светодиода
-    digitalWrite(LED_PIN, HIGH); // Выключен (инвертированная логика на PC13)
-
-    
     Serial.begin(115200);
 
-    // === ВЫХОД ШИМ: PA11, 50 Гц, 1000–2000 мкс ===
-    pinMode(PWM_OUT_PIN, OUTPUT);
-    // Настраиваем таймер на 50 Гц (период 20 мс)
-    // Для этого используем Timer 1 (PA11 = TIM1_CH4)
-    HardwareTimer *ht = new HardwareTimer(TIM1);
-    ht->setOverflow(20000, MICROSEC_FORMAT);         // 20 000 мкс = 20 мс
-    ht->attachInterrupt(pwmTimerISR);
-    ht->resume();
+    esc.attach(PWM_OUT); // автоматически настраивает таймер на 50 Гц
+    esc.writeMicroseconds(1000);
+    newPulse = false;
 
-    // Теперь analogWrite(PA11, 1000..2000) = 1000–2000 мкс!
-    analogWrite(PWM_OUT_PIN, 1100);
+    pinMode(PWM_IN, INPUT);
+    attachInterrupt(digitalPinToInterrupt(PWM_IN), pulseHandler, CHANGE);
 
-    // pinMode(PB6, INPUT_PULLUP);
-    // pinMode(PB7, INPUT_PULLUP);
-    // // IWDG: 5 секунд
-    // hiwdg.Instance = IWDG;
-    // hiwdg.Init.Prescaler = IWDG_PRESCALER_32;   // 40kHz / 32 = 1.25 kHz
-    // hiwdg.Init.Reload    = 25000;                // 12500 / 1.25 kHz = 10 сек
-    // HAL_IWDG_Init(&hiwdg);
+    systemLogic.begin();
 
-    // Тест UART: "живой"
-    // Serial.println("IPS-MCU START");
-
-    // Serial.println("I2C SCAN...");
-    // for (uint8_t addr = 1; addr < 127; addr++) {
-    //     Wire.beginTransmission(addr);
-    //     if (Wire.endTransmission() == 0) {
-    //         Serial.print("Found I2C: 0x");
-    //         if (addr < 16) Serial.print("0");
-    //         Serial.println(addr, HEX);
-    //     }
-    //     // HAL_IWDG_Refresh(&hiwdg);
-    // }
-    // Serial.println("SCAN DONE");
-
-    if (!sensors.init()) {
+    if (!sensors.init())
+    {
         Serial.println("INIT FAILED");
-        // while(1) delay(100);
         // while (1) {
-        //     if (uartSendTimer.update()){
-
-        //         digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-        //         // delay(100);
-        //         // HAL_IWDG_Refresh(&hiwdg);
-                
-        //     }
+        //     digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+        //     delay(100);
         // }
     }
-    systemLogic.begin();
-    Serial.println("SYSTEM READY");
-
 }
 
-void loop() {
-     
-    systemLogic.update();
-    
-    uint16_t desired = systemLogic.getDesiredPWM();
-    if (desired != output_pwm_us) {
-        noInterrupts();
-        output_pwm_us = constrain(desired, 1000, 2000);
-        pwm_update_needed = true;
-        interrupts();
+void loop()
+{
+
+    static unsigned long lastValidPWM = 1100;
+    static unsigned long lastUpdateTime = 0;
+    static unsigned long lastRampTime = 0;
+    unsigned long now = millis();
+
+    // 1. Мгновенная трансляция ШИМ (пасsthrough + delta)
+    if (newPulse)
+    {
+        lastValidPWM = pulseInWidth;
+        newPulse = false;
     }
-    
-    if (Serial.available()) {
+
+    int outputPWM = lastValidPWM;
+    if (currentMode == MODE_NORMAL)
+    {
+        outputPWM += lastDelta; // Применяем дельту
+    }
+    esc.writeMicroseconds(constrain(outputPWM, 1000, 2300));
+
+    // 2. Редкий вызов логики (каждые 100ms)
+    if (now - lastUpdateTime >= 3000)
+    {
+        systemLogic.update(lastValidPWM);
+        lastUpdateTime = now;
+    }
+
+    // 3. Плавный ramp для delta (каждые 20ms)
+    if (now - lastRampTime >= 10)
+    {
+        systemLogic.rampDelta(); // Плавно обновляет lastDelta
+        lastRampTime = now;
+    }
+
+    // Обработка UART команд (для тестов/переключений)
+    if (Serial.available())
+    {
         String cmd = Serial.readStringUntil('\n');
         cmd.trim();
-        if (cmd == "c") {
-            Serial.println("STARTING CALIBRATION...");
+        if (cmd == "c")
+        {
+            Serial.println("CALIBRATING MPU...");
             sensors.calibrateMPU();
             Serial.println("CALIBRATION DONE & SAVED");
         }
+        else if (cmd == "bypass")
+        {
+            currentMode = MODE_BYPASS;
+            Serial.println("MODE: BYPASS (чистый пасsthrough)");
+        }
+        else if (cmd == "normal")
+        {
+            currentMode = MODE_NORMAL;
+            Serial.println("MODE: NORMAL (ИИ-коррекция активна)");
+        }
+        else if (cmd == "calib")
+        {
+            Serial.println("ESC calib...");
+            esc.writeMicroseconds(1000);
+            delay(3000);
+            esc.writeMicroseconds(2000);
+            delay(3000);
+            esc.writeMicroseconds(1500);
+            delay(2000);
+        }
     }
 
-          // Обновление логики
-        // HAL_IWDG_Refresh(&hiwdg);
-        // delay(10);  // Задержка для стабильности
-        // Serial.println("LOOP END");
-    
+    //   delay(1);  // ~500 Гц цикл
+}
+
+void pulseHandler()
+{
+    if (digitalRead(PWM_IN) == HIGH)
+    {
+        riseTime = micros();
+    }
+    else
+    {
+        unsigned long fall = micros();
+        unsigned long width = (fall >= riseTime) ? fall - riseTime : (0xFFFFFFFF - riseTime) + fall;
+        if (width >= 800 && width <= 2300)
+        {
+            pulseInWidth = width;
+            newPulse = true;
+        }
+    }
 }

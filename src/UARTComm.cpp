@@ -20,9 +20,7 @@ uint8_t crc8(const uint8_t *data, size_t len) {
     return crc;
 }
 
-void UARTComm::sendData(int16_t ax, int16_t ay, int16_t az, 
-                        int16_t gx, int16_t gy, int16_t gz, 
-                        float temp1, float temp2, float temp3, 
+void UARTComm::sendData(float temp1, float temp2, float temp3, 
                         float voltage, float current, 
                         float pwm, float vibrationLevel, int errorCode) {
 
@@ -67,14 +65,10 @@ void UARTComm::sendData(int16_t ax, int16_t ay, int16_t az,
     serial.write(packet, len + 3);
     serial.flush();
 
-    // Частота: 2 Гц → 500 мс
-    // delay(500);
 }
 
-bool UARTComm::receiveForecast(float& predAX, float& predAY, float& predAZ, 
-                              float& predGX, float& predGY, float& predGZ,
-                              float& predTEMP1, float& predTEMP2, float& predTEMP3, 
-                              float& predVOLT, float& predCURR, float& predPWM) {
+bool UARTComm::receiveForecast(float& predTEMP1, float& predTEMP2, float& predTEMP3, 
+                              float& predVOLT, float& predCURR, float& predPWM, float& predVib) {
     if (bufferIndex >= sizeof(buffer) - 1) {
         bufferIndex = 0;
         memset(buffer, 0, sizeof(buffer));
@@ -93,18 +87,13 @@ bool UARTComm::receiveForecast(float& predAX, float& predAY, float& predAZ,
                     if (*token == ':' && tempIndex < sizeof(tempBuffer) - 1) {
                         tempBuffer[tempIndex] = '\0';
                         token++;  // Пропускаем ':'
-                        if (strncmp(tempBuffer, "PRED_AX", 7) == 0) predAX = atof(token);
-                        else if (strncmp(tempBuffer, "PRED_AY", 7) == 0) predAY = atof(token);
-                        else if (strncmp(tempBuffer, "PRED_AZ", 7) == 0) predAZ = atof(token);
-                        else if (strncmp(tempBuffer, "PRED_GX", 7) == 0) predGX = atof(token);
-                        else if (strncmp(tempBuffer, "PRED_GY", 7) == 0) predGY = atof(token);
-                        else if (strncmp(tempBuffer, "PRED_GZ", 7) == 0) predGZ = atof(token);
-                        else if (strncmp(tempBuffer, "PRED_TEMP1", 10) == 0) predTEMP1 = atof(token);
+                        if (strncmp(tempBuffer, "PRED_TEMP1", 10) == 0) predTEMP1 = atof(token);
                         else if (strncmp(tempBuffer, "PRED_TEMP2", 10) == 0) predTEMP2 = atof(token);
                         else if (strncmp(tempBuffer, "PRED_TEMP3", 10) == 0) predTEMP3 = atof(token);
                         else if (strncmp(tempBuffer, "PRED_VOLT", 9) == 0) predVOLT = atof(token);
                         else if (strncmp(tempBuffer, "PRED_CURR", 9) == 0) predCURR = atof(token);
                         else if (strncmp(tempBuffer, "PRED_PWM", 8) == 0) predPWM = atof(token);
+                        else if (strncmp(tempBuffer, "PRED_VIB", 8) == 0) predVib = atof(token);
                         tempIndex = 0;
                     } else if (tempIndex < sizeof(tempBuffer) - 1) {
                         tempBuffer[tempIndex++] = *token;
