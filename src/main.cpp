@@ -1,8 +1,10 @@
+#include <STM32FreeRTOS.h>
 #include "Sensors.h"
 #include "UARTComm.h"
 #include "SystemLogic.h"
 #include <Servo.h>
 // #include "MotorControl.h"
+
 
 #define PWM_IN PA8
 #define PWM_OUT PA11
@@ -17,7 +19,7 @@ volatile unsigned long pulseInWidth = 1100; // Входной ШИМ
 volatile bool newPulse = false;
 volatile unsigned long riseTime = 0;
 
-void pulseHandler();
+// void pulseHandler();
 
 // Глобальный режим (по умолчанию BYPASS - чистый пасsthrough)
 enum Mode
@@ -27,145 +29,238 @@ enum Mode
 };
 Mode currentMode = MODE_NORMAL;
 
+// Хэндлы задач
+TaskHandle_t pwmTaskHandle = NULL;
+TaskHandle_t logicTaskHandle = NULL;
+
 // Delta от логики (volatile для безопасного доступа)
 // volatile int lastDelta = 0; // Текущая дельта от логики
+
+
+
+// === 1. Задача: мгновенная трансляция ШИМ (самый высокий приоритет) ===
+void pwmTask(void *pvParameters) {
+  pinMode(PWM_IN, INPUT);
+  attachInterrupt(digitalPinToInterrupt(PWM_IN), []() {
+    if (digitalRead(PWM_IN) == HIGH) {
+      riseTime = micros();
+    } else {
+      unsigned long fall = micros();
+      unsigned long width = (fall >= riseTime) ? fall - riseTime : (0xFFFFFFFF - riseTime) + fall;
+      if (width >= 800 && width <= 2300) {
+        pulseInWidth = width;
+        newPulse = true;
+      }
+    }
+  }, CHANGE);
+
+  esc.attach(PWM_OUT);
+  esc.writeMicroseconds(1100);
+
+  for (;;) {
+    if (newPulse) {
+      noInterrupts();
+      unsigned long currentPWM = pulseInWidth;
+      newPulse = false;
+      interrupts();
+      
+      int outputPWM = currentPWM;
+      if (currentMode == MODE_NORMAL) {
+        outputPWM += lastDelta;
+      }
+      esc.writeMicroseconds(constrain(outputPWM, 1000, 2300));
+    }
+    vTaskDelay(1); // 1000+ Гц, ШИМ обновляется мгновенно
+  }
+}
+
+// === 2. Задача: вся логика (сенсоры, расчёты, UART) ===
+void logicTask(void *pvParameters) {
+  systemLogic.begin();  // LED, DS resolution и т.д.
+
+  // Асинхронный старт температур
+  sensors.dsSensors.setWaitForConversion(false);
+  sensors.dsSensors.requestTemperatures();
+
+  for (;;) {
+    unsigned long now = millis();
+
+    // 1. Быстрые сенсоры (MPU, ток, напряжение, вибрация)
+    static unsigned long lastFast = 0;
+    if (now - lastFast >= 20) {
+      systemLogic.updateSensorsFast();
+      lastFast = now;
+    }
+
+    // 2. Температура — полностью асинхронно
+    static unsigned long lastTempReq = 0;
+    if (now - lastTempReq >= 100) {  // запрос раз в 100 мс
+      sensors.dsSensors.requestTemperatures();
+      lastTempReq = now;
+    }
+    if (sensors.dsSensors.isConversionComplete()) {
+      systemLogic.updateTemperaturesFromSensor();
+    }
+
+    // 3. Прогнозы + расчёты + дельта
+    systemLogic.updateForecast();
+    systemLogic.updateCalculations(pulseInWidth);
+    systemLogic.rampDelta();
+
+    // 4. Отправка данных на RPi
+    static unsigned long lastSend = 0;
+    if (now - lastSend >= 200) {
+      systemLogic.sendData(pulseInWidth);
+      lastSend = now;
+    }
+
+    vTaskDelay(10); // эта задача может спать — ШИМ живёт отдельно
+  }
+}
+
 
 void setup()
 {
     Serial.println("Start");
     Serial.begin(115200);
 
-    esc.attach(PWM_OUT); // автоматически настраивает таймер на 50 Гц
-    esc.writeMicroseconds(1000);
-    newPulse = false;
+    // Создаём задачи
+  xTaskCreate(pwmTask, "PWM", 256, NULL, 5, &pwmTaskHandle);        // Приоритет 5 (самый высокий)
+  xTaskCreate(logicTask, "Logic", 512, NULL, 1, &logicTaskHandle);  // Приоритет 1
 
-    pinMode(PWM_IN, INPUT);
-    attachInterrupt(digitalPinToInterrupt(PWM_IN), pulseHandler, CHANGE);
+  vTaskStartScheduler();  // ← Запускаем FreeRTOS, setup() закончится здесь
 
-    systemLogic.begin();
+    // esc.attach(PWM_OUT); // автоматически настраивает таймер на 50 Гц
+    // esc.writeMicroseconds(1000);
+    // newPulse = false;
 
-    if (!sensors.init())
-    {
-        Serial.println("INIT FAILED");
-        // while (1) {
-        //     digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-        //     delay(100);
-        // }
-    }
+    // pinMode(PWM_IN, INPUT);
+    // attachInterrupt(digitalPinToInterrupt(PWM_IN), pulseHandler, CHANGE);
+
+    // systemLogic.begin();
+
+    // if (!sensors.init())
+    // {
+    //     Serial.println("INIT FAILED");
+    //     // while (1) {
+    //     //     digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    //     //     delay(100);
+    //     // }
+    // }
 }
 
 void loop()
 {
 
-    static unsigned long lastValidPWM = 1100;
-    static unsigned long lastSensorsFast = 0;
-    static unsigned long lastTemps = 0;
-    static unsigned long lastForecast = 0;
-    static unsigned long lastCalculations = 0;
-    static unsigned long lastSend = 0;
-    static unsigned long lastRamp = 0;
-    unsigned long now = millis();
+    // static unsigned long lastValidPWM = 1100;
+    // static unsigned long lastSensorsFast = 0;
+    // static unsigned long lastTemps = 0;
+    // static unsigned long lastForecast = 0;
+    // static unsigned long lastCalculations = 0;
+    // static unsigned long lastSend = 0;
+    // static unsigned long lastRamp = 0;
+    // unsigned long now = millis();
 
-    // 1. Мгновенная трансляция ШИМ (пасsthrough + delta)
-    if (newPulse)
-    {
-        lastValidPWM = pulseInWidth;
-        newPulse = false;
-    }
+    // // 1. Мгновенная трансляция ШИМ (пасsthrough + delta)
+    // if (newPulse)
+    // {
+    //     lastValidPWM = pulseInWidth;
+    //     newPulse = false;
+    // }
 
-    int outputPWM = lastValidPWM;
-    if (currentMode == MODE_NORMAL)
-    {
-        outputPWM += lastDelta; // Применяем дельту
-    }
-    esc.writeMicroseconds(constrain(outputPWM, 1000, 2300));
+    // int outputPWM = lastValidPWM;
+    // if (currentMode == MODE_NORMAL)
+    // {
+    //     outputPWM += lastDelta; // Применяем дельту
+    // }
+    // esc.writeMicroseconds(constrain(outputPWM, 1000, 2300));
 
-    if (now - lastSensorsFast >= 10)
-    {
-        systemLogic.updateSensorsFast();
-        lastSensorsFast = now;
-    }
+    // if (now - lastSensorsFast >= 200)
+    // {
+    //     systemLogic.updateSensorsFast();
+    //     lastSensorsFast = now;
+    // }
 
-    if (now - lastTemps >= 100)
-    {
-        systemLogic.updateTemperatures();
-        lastTemps = now;
-    }
+    // if (now - lastTemps >= 3000)
+    // {
+    //     systemLogic.updateTemperatures();
+    //     lastTemps = now;
+    // }
 
-    if (now - lastForecast >= 50)
-    {
-        systemLogic.updateForecast();
-        lastForecast = now;
-    }
+    // if (now - lastForecast >= 50)
+    // {
+    //     systemLogic.updateForecast();
+    //     lastForecast = now;
+    // }
 
-    if (now - lastCalculations >= 100)
-    {
-        systemLogic.updateCalculations(lastValidPWM);
-        lastCalculations = now;
-    }
+    // if (now - lastCalculations >= 100)
+    // {
+    //     systemLogic.updateCalculations(lastValidPWM);
+    //     lastCalculations = now;
+    // }
 
-    if (now - lastSend >= 200)
-    {
-        systemLogic.sendData(lastValidPWM);
-        lastSend = now;
-    }
+    // if (now - lastSend >= 200)
+    // {
+    //     systemLogic.sendData(lastValidPWM);
+    //     lastSend = now;
+    // }
 
-    if (now - lastRamp >= 20)
-    {
-        systemLogic.rampDelta();
-        lastRamp = now;
-    }
+    // if (now - lastRamp >= 20)
+    // {
+    //     systemLogic.rampDelta();
+    //     lastRamp = now;
+    // }
 
-    // Обработка UART команд (для тестов/переключений)
-    if (Serial.available())
-    {
-        String cmd = Serial.readStringUntil('\n');
-        cmd.trim();
-        if (cmd == "c")
-        {
-            Serial.println("CALIBRATING MPU...");
-            sensors.calibrateMPU();
-            Serial.println("CALIBRATION DONE & SAVED");
-        }
-        else if (cmd == "bypass")
-        {
-            currentMode = MODE_BYPASS;
-            Serial.println("MODE: BYPASS (чистый пасsthrough)");
-        }
-        else if (cmd == "normal")
-        {
-            currentMode = MODE_NORMAL;
-            Serial.println("MODE: NORMAL (ИИ-коррекция активна)");
-        }
-        else if (cmd == "calib")
-        {
-            Serial.println("ESC calib...");
-            esc.writeMicroseconds(1000);
-            delay(3000);
-            esc.writeMicroseconds(2000);
-            delay(3000);
-            esc.writeMicroseconds(1500);
-            delay(2000);
-        }
-    }
+    // // Обработка UART команд (для тестов/переключений)
+    // if (Serial.available())
+    // {
+    //     String cmd = Serial.readStringUntil('\n');
+    //     cmd.trim();
+    //     if (cmd == "c")
+    //     {
+    //         Serial.println("CALIBRATING MPU...");
+    //         sensors.calibrateMPU();
+    //         Serial.println("CALIBRATION DONE & SAVED");
+    //     }
+    //     else if (cmd == "bypass")
+    //     {
+    //         currentMode = MODE_BYPASS;
+    //         Serial.println("MODE: BYPASS (чистый пасsthrough)");
+    //     }
+    //     else if (cmd == "normal")
+    //     {
+    //         currentMode = MODE_NORMAL;
+    //         Serial.println("MODE: NORMAL (ИИ-коррекция активна)");
+    //     }
+    //     else if (cmd == "calib")
+    //     {
+    //         Serial.println("ESC calib...");
+    //         esc.writeMicroseconds(1000);
+    //         delay(3000);
+    //         esc.writeMicroseconds(2000);
+    //         delay(3000);
+    //         esc.writeMicroseconds(1500);
+    //         delay(2000);
+    //     }
+    // }
 
     //   delay(1);  // ~500 Гц цикл
 }
 
-void pulseHandler()
-{
-    if (digitalRead(PWM_IN) == HIGH)
-    {
-        riseTime = micros();
-    }
-    else
-    {
-        unsigned long fall = micros();
-        unsigned long width = (fall >= riseTime) ? fall - riseTime : (0xFFFFFFFF - riseTime) + fall;
-        if (width >= 800 && width <= 2300)
-        {
-            pulseInWidth = width;
-            newPulse = true;
-        }
-    }
-}
+// void pulseHandler()
+// {
+//     if (digitalRead(PWM_IN) == HIGH)
+//     {
+//         riseTime = micros();
+//     }
+//     else
+//     {
+//         unsigned long fall = micros();
+//         unsigned long width = (fall >= riseTime) ? fall - riseTime : (0xFFFFFFFF - riseTime) + fall;
+//         if (width >= 800 && width <= 2300)
+//         {
+//             pulseInWidth = width;
+//             newPulse = true;
+//         }
+//     }
+// }

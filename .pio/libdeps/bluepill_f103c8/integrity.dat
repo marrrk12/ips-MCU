@@ -1,4 +1,5 @@
-I2Cdev
 milesburton/DallasTemperature
-paulstoffregen/OneWire
 MPU6050
+paulstoffregen/OneWire
+https://github.com/stm32duino/STM32FreeRTOS.git
+I2Cdev

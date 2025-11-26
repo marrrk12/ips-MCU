@@ -49,7 +49,7 @@ private:
     unsigned long ledNextToggle = 0;
     
     int calculateDelta(int basePWM);
-    void updateLED(int errorCode);
+    void updateLED();
     void ledBlinkPattern(int blinks, int onTime, int offTime, int cycleTime);
     int getErrorCode(float temp1, float temp2, float temp3, 
         float vibration, float voltage, float current, float pwm,
@@ -64,6 +64,7 @@ public:
     int getDesiredPWM(int basePWM) { return basePWM + lastDelta; }  // Для main, но мы используем lastDelta глобально    void rampDelta();
     // void rampDelta();
     
+    void updateTemperaturesFromSensor();
     void updateSensorsFast();  // MPU, voltage, current, vibration
     void updateTemperatures();  // ASYNC DS
     void updateForecast();  // UART receive

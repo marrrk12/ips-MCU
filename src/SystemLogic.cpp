@@ -5,6 +5,11 @@ volatile int lastDelta = 0;
 
 // SystemLogic::SystemLogic(Sensors& sens, UARTComm& u) : sensors(sens), uart(u) {}
 
+void SystemLogic::updateTemperaturesFromSensor()
+{
+    sensors.readDS(t1, t2, t3);
+}
+
 void SystemLogic::updateSensorsFast()
 {
     voltage = sensors.readVoltage();
@@ -44,7 +49,6 @@ void SystemLogic::updateForecast()
     predI = forecastValid ? predI : current;
     // predPWM = forecastValid ? predPWM : basePWM;
     predVib = forecastValid ? predVib : vibration;
-    
 }
 
 void SystemLogic::updateCalculations(int basePWM)
@@ -52,7 +56,7 @@ void SystemLogic::updateCalculations(int basePWM)
     errorCode = getErrorCode(t1, t2, t3, voltage, current, basePWM, vibration,
                              predT1, predT2, predT3, predV, predI, predPWM, predVib);
     targetDelta = calculateDelta(basePWM);
-    updateLED(errorCode);
+    updateLED();
 }
 
 void SystemLogic::rampDelta()
@@ -69,24 +73,26 @@ void SystemLogic::rampDelta()
 
 void SystemLogic::sendData(int basePWM)
 {
-    // Оптимизированный без snprintf
-    Serial1.print("TEMP1:");
-    Serial1.print(t1, 1);
-    Serial1.print(";TEMP2:");
-    Serial1.print(t2, 1);
-    Serial1.print(";TEMP3:");
-    Serial1.print(t3, 1);
-    Serial1.print(";VOLT:");
-    Serial1.print(voltage, 2);
-    Serial1.print(";CURR:");
-    Serial1.print(current, 1);
-    Serial1.print(";PWM:");
-    Serial1.print(basePWM, 0);
-    Serial1.print(";VIB:");
-    Serial1.print(vibration, 2);
-    Serial1.print(";ERR:");
-    Serial1.println(errorCode);
-    Serial1.flush(); // Можно убрать если не критично
+    uart.sendData(t1, t2, t3, voltage, current, basePWM, vibration, errorCode);
+
+    // // Оптимизированный без snprintf
+    // Serial1.print("TEMP1:");
+    // Serial1.print(t1, 1);
+    // Serial1.print(";TEMP2:");
+    // Serial1.print(t2, 1);
+    // Serial1.print(";TEMP3:");
+    // Serial1.print(t3, 1);
+    // Serial1.print(";VOLT:");
+    // Serial1.print(voltage, 2);
+    // Serial1.print(";CURR:");
+    // Serial1.print(current, 1);
+    // Serial1.print(";PWM:");
+    // Serial1.print(basePWM, 0);
+    // Serial1.print(";VIB:");
+    // Serial1.print(vibration, 2);
+    // Serial1.print(";ERR:");
+    // Serial1.println(errorCode);
+    // Serial1.flush(); // Можно убрать если не критично
 }
 
 void SystemLogic::begin()
@@ -98,6 +104,7 @@ void SystemLogic::begin()
     {
         sensors.dsSensors.setResolution(sensors.dsAddresses[i], 9);
     }
+    sensors.dsSensors.setWaitForConversion(false);
 }
 
 void SystemLogic::update(unsigned long basePWM)
@@ -154,7 +161,7 @@ void SystemLogic::update(unsigned long basePWM)
     // currentCorrectedPWM = constrain(currentCorrectedPWM, 800, 2300);
 
     uart.sendData(t1, t2, t3, voltage, current, basePWM, vibration, errorCode);
-    updateLED(errorCode);
+    updateLED();
 
     // if (errorCode != ERROR_NONE || !motorOk) {
     //     motor.setPWM(EMERGENCY_PWM);
@@ -224,8 +231,8 @@ int SystemLogic::calculateDelta(int basePWM)
     if (t3 < 5.0f && t2 < 5.0f)
         delta += 60;
 
-    Serial.print(F("delta: "));
-    Serial.println(delta);
+    // Serial.print(F("delta: "));
+    // Serial.println(delta);
     return delta;
 }
 
@@ -251,7 +258,7 @@ int SystemLogic::getErrorCode(float temp1, float temp2, float temp3,
     return ERROR_NONE;
 }
 
-void SystemLogic::updateLED(int errorCode)
+void SystemLogic::updateLED()
 {
     if (errorCode == ERROR_CRITICAL)
     {
