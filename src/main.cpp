@@ -7,13 +7,13 @@
 #define PWM_IN PA8
 #define PWM_OUT PA11
 
-Sensors sensors(PB0, PA1, PA7); // Пин для 1-Wire, напряжение, ток // HardwareSerial Serial1(PA10, PA9); // Uart to RPI
-UARTComm uart(Serial); // Используем существующий Serial1
+Sensors sensors(PB0, PA1, PA7);         // Пин для 1-Wire, напряжение, ток // HardwareSerial Serial1(PA10, PA9); // Uart to RPI
+UARTComm uart(Serial);                  // Используем существующий Serial1
 SystemLogic systemLogic(sensors, uart); // Логика системы
 Servo esc;
 
 // Глобальные для входного PWM (прерывания CHANGE)
-volatile unsigned long pulseInWidth = 1100;  // Входной ШИМ
+volatile unsigned long pulseInWidth = 1100; // Входной ШИМ
 volatile bool newPulse = false;
 volatile unsigned long riseTime = 0;
 
@@ -58,8 +58,12 @@ void loop()
 {
 
     static unsigned long lastValidPWM = 1100;
-    static unsigned long lastUpdateTime = 0;
-    static unsigned long lastRampTime = 0;
+    static unsigned long lastSensorsFast = 0;
+    static unsigned long lastTemps = 0;
+    static unsigned long lastForecast = 0;
+    static unsigned long lastCalculations = 0;
+    static unsigned long lastSend = 0;
+    static unsigned long lastRamp = 0;
     unsigned long now = millis();
 
     // 1. Мгновенная трансляция ШИМ (пасsthrough + delta)
@@ -76,18 +80,40 @@ void loop()
     }
     esc.writeMicroseconds(constrain(outputPWM, 1000, 2300));
 
-    // 2. Редкий вызов логики (каждые 100ms)
-    if (now - lastUpdateTime >= 3000)
+    if (now - lastSensorsFast >= 10)
     {
-        systemLogic.update(lastValidPWM);
-        lastUpdateTime = now;
+        systemLogic.updateSensorsFast();
+        lastSensorsFast = now;
     }
 
-    // 3. Плавный ramp для delta (каждые 20ms)
-    if (now - lastRampTime >= 10)
+    if (now - lastTemps >= 100)
     {
-        systemLogic.rampDelta(); // Плавно обновляет lastDelta
-        lastRampTime = now;
+        systemLogic.updateTemperatures();
+        lastTemps = now;
+    }
+
+    if (now - lastForecast >= 50)
+    {
+        systemLogic.updateForecast();
+        lastForecast = now;
+    }
+
+    if (now - lastCalculations >= 100)
+    {
+        systemLogic.updateCalculations(lastValidPWM);
+        lastCalculations = now;
+    }
+
+    if (now - lastSend >= 200)
+    {
+        systemLogic.sendData(lastValidPWM);
+        lastSend = now;
+    }
+
+    if (now - lastRamp >= 20)
+    {
+        systemLogic.rampDelta();
+        lastRamp = now;
     }
 
     // Обработка UART команд (для тестов/переключений)

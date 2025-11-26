@@ -5,29 +5,117 @@ volatile int lastDelta = 0;
 
 // SystemLogic::SystemLogic(Sensors& sens, UARTComm& u) : sensors(sens), uart(u) {}
 
+void SystemLogic::updateSensorsFast()
+{
+    voltage = sensors.readVoltage();
+    current = sensors.readCurrent();
+    float ax, ay, az, gx, gy, gz;
+    sensors.readMPU(ax, ay, az, gx, gy, gz);
+    vibration = sensors.getVibrationLevel();
+}
+
+void SystemLogic::updateTemperatures()
+{
+    unsigned long now = millis();
+    if (!tempsRequested)
+    {
+        sensors.dsSensors.requestTemperatures();
+        lastTempRequest = now;
+        tempsRequested = true;
+    }
+    else if (now - lastTempRequest >= tempConversionTime)
+    {
+        sensors.readDS(t1, t2, t3);
+        tempsRequested = false;
+    }
+}
+
+void SystemLogic::updateForecast()
+{
+    if (uart.receiveForecast(predT1, predT2, predT3, predV, predI, predPWM, predVib))
+    { // предпоследний — predPWM пока не используется
+        lastForecastTime = millis();
+    }
+    bool forecastValid = (millis() - lastForecastTime < forecastTimeout);
+    predT1 = forecastValid ? predT1 : t1;
+    predT2 = forecastValid ? predT2 : t2;
+    predT3 = forecastValid ? predT3 : t3;
+    predV = forecastValid ? predV : voltage;
+    predI = forecastValid ? predI : current;
+    // predPWM = forecastValid ? predPWM : basePWM;
+    predVib = forecastValid ? predVib : vibration;
+    
+}
+
+void SystemLogic::updateCalculations(int basePWM)
+{
+    errorCode = getErrorCode(t1, t2, t3, voltage, current, basePWM, vibration,
+                             predT1, predT2, predT3, predV, predI, predPWM, predVib);
+    targetDelta = calculateDelta(basePWM);
+    updateLED(errorCode);
+}
+
+void SystemLogic::rampDelta()
+{
+    if (targetDelta > lastDelta)
+    {
+        lastDelta = min(lastDelta + RAMP_STEP, targetDelta);
+    }
+    else if (targetDelta < lastDelta)
+    {
+        lastDelta = max(lastDelta - RAMP_STEP, targetDelta);
+    }
+}
+
+void SystemLogic::sendData(int basePWM)
+{
+    // Оптимизированный без snprintf
+    Serial1.print("TEMP1:");
+    Serial1.print(t1, 1);
+    Serial1.print(";TEMP2:");
+    Serial1.print(t2, 1);
+    Serial1.print(";TEMP3:");
+    Serial1.print(t3, 1);
+    Serial1.print(";VOLT:");
+    Serial1.print(voltage, 2);
+    Serial1.print(";CURR:");
+    Serial1.print(current, 1);
+    Serial1.print(";PWM:");
+    Serial1.print(basePWM, 0);
+    Serial1.print(";VIB:");
+    Serial1.print(vibration, 2);
+    Serial1.print(";ERR:");
+    Serial1.println(errorCode);
+    Serial1.flush(); // Можно убрать если не критично
+}
+
 void SystemLogic::begin()
 {
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, HIGH); // Выключен по умолчанию
     Serial.println("SystemLogic: INITIALIZED");
-    for (uint8_t i = 0; i < 3; i++) {
-    sensors.dsSensors.setResolution(sensors.dsAddresses[i], 9);
-  }
+    for (uint8_t i = 0; i < 3; i++)
+    {
+        sensors.dsSensors.setResolution(sensors.dsAddresses[i], 9);
+    }
 }
 
 void SystemLogic::update(unsigned long basePWM)
 {
     unsigned long now = millis();
 
-  // Асинх DS18B20
-  if (!tempsRequested) {
-    sensors.dsSensors.requestTemperatures();
-    lastTempRequest = now;
-    tempsRequested = true;
-  } else if (now - lastTempRequest >= tempConversionTime) {
-    sensors.readDS(t1, t2, t3);
-    tempsRequested = false;
-  }
+    // Асинх DS18B20
+    if (!tempsRequested)
+    {
+        sensors.dsSensors.requestTemperatures();
+        lastTempRequest = now;
+        tempsRequested = true;
+    }
+    else if (now - lastTempRequest >= tempConversionTime)
+    {
+        sensors.readDS(t1, t2, t3);
+        tempsRequested = false;
+    }
     // sensors.readDS(t1, t2, t3);
     voltage = sensors.readVoltage();
     current = sensors.readCurrent();
@@ -49,12 +137,11 @@ void SystemLogic::update(unsigned long basePWM)
     float usePWM = forecastValid ? predPWM : basePWM;
     float useVib = forecastValid ? predVib : vibration;
 
-
-    errorCode = getErrorCode(t1, t2, t3,  voltage, current, basePWM, vibration,
-                           predT1, predT2, predT3, predV, predI, predPWM, predVib);
+    errorCode = getErrorCode(t1, t2, t3, voltage, current, basePWM, vibration,
+                             useT1, useT2, useT3, useV, useI, usePWM, useVib);
     voltage = 37.5;
-    t2=30;
-    t3=20;
+    t2 = 30;
+    t3 = 20;
     predV = 37;
     targetDelta = calculateDelta(basePWM);
     // int target = basePWM + delta;
@@ -93,13 +180,17 @@ void SystemLogic::update(unsigned long basePWM)
     // }
 }
 
-void SystemLogic::rampDelta() {
-  if (targetDelta > lastDelta) {
-    lastDelta = min(lastDelta + RAMP_STEP, targetDelta);
-  } else if (targetDelta < lastDelta) {
-    lastDelta = max(lastDelta - RAMP_STEP, targetDelta);
-  }
-}
+// void SystemLogic::rampDelta()
+// {
+//     if (targetDelta > lastDelta)
+//     {
+//         lastDelta = min(lastDelta + RAMP_STEP, targetDelta);
+//     }
+//     else if (targetDelta < lastDelta)
+//     {
+//         lastDelta = max(lastDelta - RAMP_STEP, targetDelta);
+//     }
+// }
 
 int SystemLogic::calculateDelta(int basePWM)
 {
@@ -107,7 +198,7 @@ int SystemLogic::calculateDelta(int basePWM)
 
     // Текущие
     if (t1 > maxTempMotor) // все цифры надо изменить на зарезервированные значения, чтобы их можно было менять глобально
-        delta -= 200; 
+        delta -= 200;
     if (t2 > maxTempBattery)
         delta -= 150;
     if (vibration > maxVibration)
@@ -132,7 +223,7 @@ int SystemLogic::calculateDelta(int basePWM)
     // Если холодно — можно чуть поддать
     if (t3 < 5.0f && t2 < 5.0f)
         delta += 60;
-    
+
     Serial.print(F("delta: "));
     Serial.println(delta);
     return delta;

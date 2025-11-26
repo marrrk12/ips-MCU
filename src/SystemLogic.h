@@ -62,8 +62,14 @@ public:
     void begin();
     void update(unsigned long basePWM);     // ← теперь принимает basePWM
     int getDesiredPWM(int basePWM) { return basePWM + lastDelta; }  // Для main, но мы используем lastDelta глобально    void rampDelta();
-    void rampDelta();
+    // void rampDelta();
     
+    void updateSensorsFast();  // MPU, voltage, current, vibration
+    void updateTemperatures();  // ASYNC DS
+    void updateForecast();  // UART receive
+    void updateCalculations(int basePWM);  // error, delta
+    void rampDelta();  // Плавный ramp lastDelta
+    void sendData(int basePWM);  // Отправка
 
     // Коды ошибок (зарезервированные значения для sendData)
     static const int ERROR_NONE = -1;                   // Нормальная работа
